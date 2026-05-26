@@ -40,9 +40,30 @@ app.get("/api/auction", (_req, res) => {
   res.json(getSnapshot());
 });
 
-app.post("/api/auction/start", (_req, res) => {
+app.post("/api/auction/start", (req, res) => {
   try {
-    const snapshot = startAuction();
+    const schema = z.object({
+      durationSeconds: z
+        .number({ invalid_type_error: "竞拍时长必须是数字" })
+        .int("竞拍时长必须是整数")
+        .min(15, "竞拍时长不能少于 15 秒")
+        .max(600, "竞拍时长不能超过 600 秒")
+        .optional(),
+      incrementStep: z
+        .number({ invalid_type_error: "最低加价必须是数字" })
+        .int("最低加价必须是整数")
+        .min(1, "最低加价不能少于 1 元")
+        .max(100_000, "最低加价不能超过 100000 元")
+        .optional(),
+      ceilingPrice: z
+        .number({ invalid_type_error: "封顶价必须是数字" })
+        .int("封顶价必须是整数")
+        .min(1, "封顶价不能少于 1 元")
+        .max(10_000_000, "封顶价不能超过 10000000 元")
+        .optional()
+    });
+    const input = schema.parse(req.body ?? {});
+    const snapshot = startAuction(input);
     io.to(ROOM_ID).emit("auction:started", snapshot);
     res.json(snapshot);
   } catch (error) {
@@ -159,6 +180,10 @@ server.listen(PORT, () => {
 });
 
 function getErrorMessage(error: unknown) {
+  if (error instanceof z.ZodError) {
+    return error.issues.map((issue) => issue.message).join("；");
+  }
+
   if (error instanceof Error) {
     return error.message;
   }

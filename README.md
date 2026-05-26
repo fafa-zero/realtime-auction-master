@@ -108,7 +108,18 @@ AI_MODEL=your_model_name
 
 - `GET /api/health`：健康检查。
 - `GET /api/auction`：获取竞拍快照。
-- `POST /api/auction/start`：启动或重开竞拍。
+- `POST /api/auction/start`：启动或重开竞拍。可传演示参数：
+
+```json
+{
+  "durationSeconds": 30,
+  "incrementStep": 100,
+  "ceilingPrice": 3000
+}
+```
+
+`durationSeconds` 范围为 15 到 600 秒，适合录制短 Demo；不传参数时使用默认 90 秒竞拍。
+
 - `POST /api/auction/cancel`：主播取消竞拍。
 - `POST /api/orders/:orderId/pay`：模拟支付，返回订单和最新快照。
 - `POST /api/ai/product-script`：生成商品讲解词。

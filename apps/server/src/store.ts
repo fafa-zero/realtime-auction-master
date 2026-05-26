@@ -36,6 +36,12 @@ const participantIds = new Set<string>();
 const processedBidRequestIds = new Map<string, Bid>();
 let order: Order | null = null;
 
+export interface StartAuctionOptions {
+  durationSeconds?: number;
+  ceilingPrice?: number;
+  incrementStep?: number;
+}
+
 export function getAuction() {
   return auction;
 }
@@ -51,7 +57,7 @@ export function getSnapshot(): AuctionSnapshot {
   };
 }
 
-export function startAuction() {
+export function startAuction(options: StartAuctionOptions = {}) {
   if (auction.status !== "PENDING" && auction.status !== "UNSOLD" && auction.status !== "SOLD") {
     throw new Error("当前竞拍状态不允许开始");
   }
@@ -61,6 +67,22 @@ export function startAuction() {
   participantIds.clear();
   processedBidRequestIds.clear();
   order = null;
+
+  if (options.durationSeconds !== undefined) {
+    auction.durationSeconds = options.durationSeconds;
+  }
+
+  if (options.incrementStep !== undefined) {
+    auction.incrementStep = options.incrementStep;
+  }
+
+  if (options.ceilingPrice !== undefined) {
+    auction.ceilingPrice = options.ceilingPrice;
+  }
+
+  if (auction.ceilingPrice < auction.startPrice + auction.incrementStep) {
+    throw new Error("封顶价必须高于最低首次出价");
+  }
 
   auction.currentPrice = auction.startPrice;
   auction.startTime = now;
