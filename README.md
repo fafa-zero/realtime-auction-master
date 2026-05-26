@@ -173,6 +173,20 @@ Socket.IO 事件：
 8. 点击“模拟支付”，观察订单状态变为已支付。
 9. 主播端点击 AI 竞拍助手按钮，生成讲解词、竞拍复盘或异常出价提示。
 
+## Git 提交规则
+
+- 一个小功能一个 commit。
+- 提交前运行 `npm --workspaces run typecheck`。
+- 必要时运行 `npm run build`。
+- 只 `git add` 本次相关文件，避免混入其他窗口或临时文件。
+- commit message 使用清楚前缀：
+  - `frontend:`
+  - `server:`
+  - `miniprogram:`
+  - `docs:`
+  - `test:`
+  - `chore:`
+
 ## 关键代码位置
 
 - 后端入口：`apps/server/src/index.ts`
