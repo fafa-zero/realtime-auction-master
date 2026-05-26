@@ -115,6 +115,12 @@ h2 {
   font-size: 18px;
 }
 
+.topbar-meta {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .connection,
 .live-badge,
 .status-pill {
@@ -189,6 +195,27 @@ h2 {
   font-size: 34px;
 }
 
+.live-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.live-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgb(255 255 255 / 0.24);
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.22);
+  color: rgb(255 255 255 / 0.9);
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .product-strip,
 .stats-grid,
 .panel-section,
@@ -215,6 +242,25 @@ h2 {
 .status-pill {
   color: #fff;
   background: #253545;
+}
+
+.status-active {
+  background: var(--accent);
+}
+
+.status-sold {
+  background: var(--green);
+}
+
+.status-unsold,
+.status-cancelled {
+  background: #5b6874;
+}
+
+.product-note {
+  margin: 10px 0 0;
+  color: #334250;
+  font-weight: 700;
 }
 
 .stats-grid {
@@ -260,6 +306,25 @@ h2 {
   background: #fff8e6;
 }
 
+.sync-strip {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid #cfe5f7;
+  border-radius: 8px;
+  color: #24536f;
+  background: #eef8ff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.sync-strip span:last-child {
+  color: var(--muted);
+  font-weight: 600;
+}
+
 .panel-section {
   padding: 16px;
 }
@@ -279,6 +344,19 @@ h2 {
   line-height: 1;
 }
 
+.status-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.status-summary strong {
+  color: var(--ink);
+}
+
 .progress {
   overflow: hidden;
   height: 10px;
@@ -294,11 +372,41 @@ h2 {
   transition: width 0.2s ease;
 }
 
+.extend-alert {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid #ffd18a;
+  border-radius: 8px;
+  color: #714a00;
+  background: #fff7e8;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .rule-list {
   display: grid;
   gap: 6px;
   margin-top: 12px;
   font-size: 13px;
+}
+
+.latest-bid {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #eef2f5;
+  font-size: 13px;
+}
+
+.latest-bid span {
+  color: var(--muted);
+}
+
+.latest-bid strong {
+  color: var(--accent);
+  text-align: right;
 }
 
 .field {
@@ -315,6 +423,18 @@ h2 {
   padding: 0 12px;
   color: var(--ink);
   background: #fbfcfd;
+}
+
+.bid-helper {
+  min-height: 20px;
+  margin: -2px 0 12px;
+  color: #98690c;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.bid-helper.ok {
+  color: var(--green);
 }
 
 .primary-button {
@@ -336,6 +456,29 @@ h2 {
   gap: 10px;
 }
 
+.button-row button,
+.order-box button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.ai-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ai-actions button {
+  min-width: 0;
+  padding: 0 10px;
+}
+
+.ai-actions button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .danger {
   border-color: #f0b8c0;
   color: var(--accent-dark);
@@ -344,11 +487,139 @@ h2 {
 
 .order-box {
   display: grid;
-  gap: 8px;
+  gap: 12px;
 }
 
 .order-box button {
   margin-top: 4px;
+}
+
+.order-head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.pay-status,
+.source-badge,
+.risk-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.pay-status {
+  color: #98690c;
+  background: #fff4d7;
+}
+
+.pay-status.paid {
+  color: var(--green);
+  background: #e9f7f1;
+}
+
+.order-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 12px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f7fafc;
+  font-size: 13px;
+}
+
+.order-grid span {
+  color: var(--muted);
+}
+
+.order-grid strong {
+  text-align: right;
+  word-break: break-all;
+}
+
+.ai-box {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #dbe7ef;
+  border-radius: 8px;
+  background: #f7fafc;
+}
+
+.ai-loading {
+  border-color: #cfe5f7;
+  background: #eef8ff;
+}
+
+.ai-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.source-model {
+  color: #24536f;
+  background: #dff1ff;
+}
+
+.source-fallback {
+  color: #714a00;
+  background: #fff4d7;
+}
+
+.risk-low {
+  color: var(--green);
+  background: #e9f7f1;
+}
+
+.risk-medium {
+  color: #98690c;
+  background: #fff4d7;
+}
+
+.risk-high {
+  color: var(--accent-dark);
+  background: #fff1f3;
+}
+
+.ai-content,
+.ai-box p {
+  margin-bottom: 0;
+  color: #334250;
+  line-height: 1.65;
+}
+
+.ai-empty {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px dashed #cfd9e1;
+  border-radius: 8px;
+  color: var(--muted);
+  background: #fbfcfd;
+}
+
+.ai-empty p {
+  margin-bottom: 0;
 }
 
 .bid-list {
@@ -366,8 +637,28 @@ h2 {
   border-bottom: 1px solid #eef2f5;
 }
 
+.bid-row.is-latest {
+  padding: 10px;
+  border: 1px solid #f3c5cb;
+  border-radius: 8px;
+  background: #fff6f7;
+}
+
 .bid-row:last-child {
   border-bottom: 0;
+}
+
+.bid-row span {
+  display: block;
+  font-weight: 700;
+}
+
+.bid-row small {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  color: var(--muted);
 }
 
 .bid-row strong {
@@ -395,17 +686,31 @@ h2 {
     flex-direction: column;
   }
 
+  .sync-strip {
+    grid-template-columns: 1fr;
+  }
+
   .live-stage,
   .live-stage img {
     min-height: 360px;
   }
 
   .stats-grid,
-  .button-row {
+  .button-row,
+  .ai-actions {
     grid-template-columns: 1fr;
   }
 
   .countdown {
     font-size: 34px;
+  }
+
+  .order-head {
+    grid-template-columns: auto 1fr;
+  }
+
+  .pay-status {
+    grid-column: 1 / -1;
+    justify-self: start;
   }
 }

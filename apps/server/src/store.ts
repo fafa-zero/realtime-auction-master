@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { completeWithModel } from "./ai.js";
 import type { Auction, AuctionSnapshot, Bid, Order, Product } from "./types.js";
 
 const product: Product = {
@@ -32,6 +33,7 @@ const auction: Auction = {
 
 const bids: Bid[] = [];
 const participantIds = new Set<string>();
+const processedBidRequestIds = new Map<string, Bid>();
 let order: Order | null = null;
 
 export function getAuction() {
@@ -57,6 +59,7 @@ export function startAuction() {
   const now = Date.now();
   bids.length = 0;
   participantIds.clear();
+  processedBidRequestIds.clear();
   order = null;
 
   auction.currentPrice = auction.startPrice;
@@ -89,15 +92,30 @@ export function placeBid(input: {
   userId: string;
   nickname: string;
   price: number;
+  clientRequestId: string;
 }) {
   const now = Date.now();
+
+  const previousBid = processedBidRequestIds.get(input.clientRequestId);
+  if (previousBid) {
+    return {
+      bid: previousBid,
+      extended: false,
+      settled: false,
+      duplicate: true,
+      snapshot: getSnapshot()
+    };
+  }
 
   if (auction.status !== "ACTIVE") {
     throw new Error("竞拍未进行，无法出价");
   }
 
-  if (!auction.endTime || now >= auction.endTime) {
-    settleAuction();
+  if (!auction.endTime) {
+    throw new Error("竞拍已结束，无法出价");
+  }
+
+  if (now >= auction.endTime) {
     throw new Error("竞拍已结束，无法出价");
   }
 
@@ -116,10 +134,12 @@ export function placeBid(input: {
     userId: input.userId,
     nickname: input.nickname,
     price: input.price,
-    createdAt: now
+    createdAt: now,
+    clientRequestId: input.clientRequestId
   };
 
   bids.push(bid);
+  processedBidRequestIds.set(input.clientRequestId, bid);
   participantIds.add(input.userId);
 
   auction.currentPrice = input.price;
@@ -137,20 +157,26 @@ export function placeBid(input: {
 
   auction.version += 1;
 
+  let settled = false;
   if (auction.currentPrice >= auction.ceilingPrice) {
-    settleAuction();
+    settled = settleAuction().settled;
   }
 
   return {
     bid,
     extended: shouldExtend,
+    settled,
+    duplicate: false,
     snapshot: getSnapshot()
   };
 }
 
 export function settleAuction() {
   if (auction.status !== "ACTIVE") {
-    return getSnapshot();
+    return {
+      settled: false,
+      snapshot: getSnapshot()
+    };
   }
 
   auction.version += 1;
@@ -171,7 +197,10 @@ export function settleAuction() {
     auction.status = "UNSOLD";
   }
 
-  return getSnapshot();
+  return {
+    settled: true,
+    snapshot: getSnapshot()
+  };
 }
 
 export function payOrder(orderId: string) {
@@ -179,10 +208,84 @@ export function payOrder(orderId: string) {
     throw new Error("订单不存在");
   }
 
+  if (order.status === "PAID") {
+    return order;
+  }
+
   order = {
     ...order,
     status: "PAID"
   };
+  auction.version += 1;
 
   return order;
+}
+
+export async function generateProductScript() {
+  const fallbackContent = `今晚直播间这款${product.name}正在竞拍，${auction.startPrice} 元起拍，每次最低加价 ${auction.incrementStep} 元，封顶价 ${auction.ceilingPrice} 元。喜欢的朋友可以关注当前最高价，把握出价时机。`;
+
+  return completeWithModel({
+    title: "AI 商品讲解词",
+    systemPrompt: "你是直播电商主播助理，输出必须简洁、合规、自然，不得承诺保值、收益或绝对效果。",
+    userPrompt: `请生成 80 字以内直播讲解词。\n商品名称：${product.name}\n商品描述：${product.description}\n起拍价：${auction.startPrice}\n最低加价：${auction.incrementStep}\n封顶价：${auction.ceilingPrice}\n竞拍时长：${auction.durationSeconds} 秒`,
+    fallbackContent
+  });
+}
+
+export async function generateAuctionSummary() {
+  const bidCount = bids.length;
+  const statusText = {
+    PENDING: "待开始",
+    ACTIVE: "竞拍中",
+    SOLD: "已成交",
+    UNSOLD: "已流拍",
+    CANCELLED: "已取消"
+  } satisfies Record<typeof auction.status, string>;
+
+  const result =
+    auction.status === "SOLD" && order
+      ? `本场竞拍由 ${order.buyerNickname} 以 ${order.finalPrice} 元成交。`
+      : `本场竞拍当前状态为${statusText[auction.status]}。`;
+
+  const fallbackContent = `${result}共有 ${participantIds.size} 位用户参与，累计 ${bidCount} 次有效出价，触发 ${auction.extendCount} 次自动延时。建议主播复盘出价高峰时间和用户互动节奏，用于优化下一场竞拍讲解。`;
+
+  return completeWithModel({
+    title: "AI 竞拍复盘",
+    systemPrompt: "你是直播电商运营分析助手，输出要简短、客观，给出可执行建议。",
+    userPrompt: `请生成一段竞拍复盘。\n商品：${product.name}\n成交状态：${auction.status}\n当前价：${auction.currentPrice}\n参与人数：${participantIds.size}\n出价次数：${bidCount}\n延时次数：${auction.extendCount}`,
+    fallbackContent
+  });
+}
+
+export async function detectBidRisk(input: { userId: string; price: number }) {
+  const userBids = bids.filter((bid) => bid.userId === input.userId);
+  const recentBids = userBids.filter((bid) => Date.now() - bid.createdAt <= 30_000);
+  const jumpAmount = input.price - auction.currentPrice;
+  const reachesCeiling = input.price >= auction.ceilingPrice;
+  const highFrequency = recentBids.length >= 3;
+  const largeJump = jumpAmount >= auction.incrementStep * 5;
+
+  const level = reachesCeiling || highFrequency || largeJump ? "中" : "低";
+  const reasons = [
+    reachesCeiling ? "本次出价达到封顶价，会立即触发成交" : null,
+    highFrequency ? "该用户 30 秒内出价次数较多" : null,
+    largeJump ? "本次加价幅度明显高于最低加价要求" : null
+  ].filter(Boolean);
+
+  const fallbackContent =
+    reasons.length > 0
+      ? `风险等级：${level}。${reasons.join("；")}。建议主播关注用户身份和直播间反馈。`
+      : "风险等级：低。当前出价行为未发现明显异常，可按正常竞拍流程处理。";
+
+  const result = await completeWithModel({
+    title: "AI 异常出价提示",
+    systemPrompt: "你是竞拍风控助手，只输出风险等级和原因，风险等级只能是低、中、高。",
+    userPrompt: `请判断本次出价风险。\n当前最高价：${auction.currentPrice}\n最新出价：${input.price}\n用户 30 秒内出价次数：${recentBids.length}\n本次加价幅度：${jumpAmount}\n是否达到封顶价：${reachesCeiling}`,
+    fallbackContent
+  });
+
+  return {
+    ...result,
+    level
+  };
 }

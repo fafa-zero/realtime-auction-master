@@ -5,6 +5,9 @@ import { Server } from "socket.io";
 import { z } from "zod";
 import {
   cancelAuction,
+  detectBidRisk,
+  generateAuctionSummary,
+  generateProductScript,
   getAuction,
   getSnapshot,
   payOrder,
@@ -28,10 +31,6 @@ const io = new Server(server, {
     methods: ["GET", "POST"]
   }
 });
-
-function broadcastSnapshot(eventName: string) {
-  io.to(ROOM_ID).emit(eventName, getSnapshot());
-}
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, serverTime: Date.now() });
@@ -68,10 +67,37 @@ app.post("/api/auction/cancel", (req, res) => {
 app.post("/api/orders/:orderId/pay", (req, res) => {
   try {
     const paidOrder = payOrder(req.params.orderId);
-    broadcastSnapshot("order:paid");
-    res.json(paidOrder);
+    const snapshot = getSnapshot();
+    io.to(ROOM_ID).emit("order:paid", snapshot);
+    res.json({
+      ...paidOrder,
+      ok: true,
+      order: paidOrder,
+      snapshot
+    });
   } catch (error) {
     res.status(400).json({ message: getErrorMessage(error) });
+  }
+});
+
+app.post("/api/ai/product-script", async (_req, res) => {
+  res.json(await generateProductScript());
+});
+
+app.post("/api/ai/auction-summary", async (_req, res) => {
+  res.json(await generateAuctionSummary());
+});
+
+app.post("/api/ai/bid-risk", async (req, res) => {
+  try {
+    const schema = z.object({
+      userId: z.string().min(1),
+      price: z.number().positive()
+    });
+    const input = schema.parse(req.body);
+    res.json(await detectBidRisk(input));
+  } catch (error) {
+    res.status(400).json(createAiErrorResponse(getErrorMessage(error)));
   }
 });
 
@@ -89,7 +115,8 @@ io.on("connection", (socket) => {
       const schema = z.object({
         userId: z.string().min(1),
         nickname: z.string().min(1),
-        price: z.number().positive()
+        price: z.number().positive(),
+        clientRequestId: z.string().min(1)
       });
       const input = schema.parse(payload);
       const result = placeBid(input);
@@ -100,7 +127,7 @@ io.on("connection", (socket) => {
         io.to(ROOM_ID).emit("auction:extended", result.snapshot);
       }
 
-      if (result.snapshot.auction.status === "SOLD") {
+      if (result.settled) {
         io.to(ROOM_ID).emit("auction:ended", result.snapshot);
       }
 
@@ -119,8 +146,11 @@ setInterval(() => {
   }
 
   if (Date.now() >= auction.endTime) {
-    const snapshot = settleAuction();
-    io.to(ROOM_ID).emit("auction:ended", snapshot);
+    const result = settleAuction();
+
+    if (result.settled) {
+      io.to(ROOM_ID).emit("auction:ended", result.snapshot);
+    }
   }
 }, 500);
 
@@ -134,4 +164,12 @@ function getErrorMessage(error: unknown) {
   }
 
   return "操作失败";
+}
+
+function createAiErrorResponse(message: string) {
+  return {
+    ok: false,
+    message,
+    fallback: true
+  };
 }
