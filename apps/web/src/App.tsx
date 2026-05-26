@@ -19,7 +19,7 @@ import {
   WifiOff
 } from "lucide-react";
 import { io, type Socket } from "socket.io-client";
-import type { AuctionSnapshot, AuctionStatus } from "./types";
+import type { AuctionSnapshot, AuctionStatus, Order } from "./types";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 
@@ -32,12 +32,23 @@ const statusText = {
 };
 
 type AiResult = {
+  ok?: boolean;
   title: string;
   content: string;
   generatedAt: number;
   source: "model" | "fallback";
+  fallback?: boolean;
+  message?: string;
   level?: string;
 };
+
+type PayOrderResponse =
+  | Order
+  | {
+      ok: true;
+      order: Order;
+      snapshot: AuctionSnapshot;
+    };
 
 type AiTask = "script" | "summary" | "risk";
 
@@ -284,7 +295,10 @@ export function App() {
       }
 
       setAiResult(data);
-      setMessage(data.source === "model" ? "AI 助手已生成结果" : "已使用本地 AI 兜底策略生成结果");
+      setMessage(
+        data.message ??
+          (data.source === "model" ? "AI 助手已生成结果" : "已使用本地 AI 兜底策略生成结果")
+      );
     } catch {
       setMessage("AI 助手暂时不可用，请稍后重试");
     } finally {
@@ -299,17 +313,22 @@ export function App() {
     }
 
     const res = await fetch(`${API_URL}/api/orders/${snapshot.order.id}/pay`, { method: "POST" });
-    const data = await res.json();
+    const data = (await res.json()) as PayOrderResponse & { message?: string };
 
     if (!res.ok) {
       setMessage(data.message ?? "支付失败");
       return;
     }
 
-    setSnapshot({
-      ...snapshot,
-      order: data
-    });
+    if ("snapshot" in data) {
+      setSnapshot(data.snapshot);
+    } else {
+      setSnapshot({
+        ...snapshot,
+        order: data
+      });
+    }
+
     setMessage("模拟支付成功");
   }
 
