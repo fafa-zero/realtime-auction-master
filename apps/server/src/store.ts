@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { completeWithModel } from "./ai.js";
 import type { Auction, AuctionHistoryItem, AuctionSnapshot, Bid, Order, Product } from "./types.js";
+
+const DATA_FILE = resolve(process.env.AUCTION_DATA_FILE ?? "data/auction-state.json");
 
 const product: Product = {
   id: "product-1",
@@ -36,6 +40,8 @@ const participantIds = new Set<string>();
 const processedBidRequestIds = new Map<string, Bid>();
 const history: AuctionHistoryItem[] = [];
 let order: Order | null = null;
+
+loadState();
 
 export interface StartAuctionOptions {
   durationSeconds?: number;
@@ -111,6 +117,7 @@ export function startAuction(options: StartAuctionOptions = {}) {
   auction.winnerUserId = null;
   auction.winnerNickname = null;
   auction.version += 1;
+  saveState();
 
   return getSnapshot();
 }
@@ -123,6 +130,7 @@ export function cancelAuction(reason = "主播取消竞拍") {
   auction.status = "CANCELLED";
   auction.version += 1;
   archiveCurrentAuction();
+  saveState();
 
   return {
     reason,
@@ -204,6 +212,10 @@ export function placeBid(input: {
     settled = settleAuction().settled;
   }
 
+  if (!settled) {
+    saveState();
+  }
+
   return {
     bid,
     extended: shouldExtend,
@@ -240,6 +252,7 @@ export function settleAuction() {
   }
 
   archiveCurrentAuction();
+  saveState();
 
   return {
     settled: true,
@@ -262,6 +275,7 @@ export function payOrder(orderId: string) {
   };
   auction.version += 1;
   archiveCurrentAuction();
+  saveState();
 
   return order;
 }
@@ -288,6 +302,55 @@ function archiveCurrentAuction() {
   }
 
   history.splice(20);
+}
+
+function saveState() {
+  mkdirSync(dirname(DATA_FILE), { recursive: true });
+  writeFileSync(
+    DATA_FILE,
+    JSON.stringify(
+      {
+        auction,
+        bids,
+        history,
+        order
+      },
+      null,
+      2
+    )
+  );
+}
+
+function loadState() {
+  try {
+    const data = JSON.parse(readFileSync(DATA_FILE, "utf8")) as {
+      auction?: Partial<Auction>;
+      bids?: Bid[];
+      history?: AuctionHistoryItem[];
+      order?: Order | null;
+    };
+
+    Object.assign(auction, data.auction);
+
+    if (Array.isArray(data.bids)) {
+      bids.splice(0, bids.length, ...data.bids);
+      participantIds.clear();
+      processedBidRequestIds.clear();
+
+      for (const bid of bids) {
+        participantIds.add(bid.userId);
+        processedBidRequestIds.set(bid.clientRequestId, bid);
+      }
+    }
+
+    if (Array.isArray(data.history)) {
+      history.splice(0, history.length, ...data.history.slice(0, 20));
+    }
+
+    order = data.order ?? null;
+  } catch {
+    // Missing or invalid state file falls back to the seeded demo auction.
+  }
 }
 
 export async function generateProductScript() {

@@ -60,7 +60,10 @@ npm run dev
 ```bash
 PORT=4000
 CLIENT_URL=http://localhost:5173
+AUCTION_DATA_FILE=data/auction-state.json
 ```
+
+`AUCTION_DATA_FILE` 用于保存当前竞拍、出价、历史记录和订单。默认写入本地 `data/` 目录，适合演示阶段的轻量持久化；生产环境应替换为数据库。
 
 前端：
 
