@@ -121,6 +121,7 @@ AI_MODEL=your_model_name
 `durationSeconds` 范围为 15 到 600 秒，适合录制短 Demo；不传参数时使用默认 90 秒竞拍。
 
 - `POST /api/auction/cancel`：主播取消竞拍。
+- `POST /api/auction/bids`：HTTP 出价降级接口，适合 WebSocket 不可用或自动化测试时使用。
 - `POST /api/orders/:orderId/pay`：模拟支付，返回订单和最新快照。
 - `POST /api/ai/product-script`：生成商品讲解词。
 - `POST /api/ai/auction-summary`：生成竞拍复盘。
