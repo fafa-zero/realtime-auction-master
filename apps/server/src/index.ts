@@ -95,7 +95,7 @@ app.post("/api/ai/bid-risk", async (req, res) => {
     const input = schema.parse(req.body);
     res.json(await detectBidRisk(input));
   } catch (error) {
-    res.status(400).json({ message: getErrorMessage(error) });
+    res.status(400).json(createAiErrorResponse(getErrorMessage(error)));
   }
 });
 
@@ -159,4 +159,12 @@ function getErrorMessage(error: unknown) {
   }
 
   return "操作失败";
+}
+
+function createAiErrorResponse(message: string) {
+  return {
+    ok: false,
+    message,
+    fallback: true
+  };
 }

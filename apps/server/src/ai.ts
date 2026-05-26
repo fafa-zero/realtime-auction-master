@@ -1,8 +1,11 @@
 export interface AiResult {
+  ok: true;
   title: string;
   content: string;
   generatedAt: number;
   source: "model" | "fallback";
+  fallback: boolean;
+  message: string;
 }
 
 export async function completeWithModel(input: {
@@ -17,7 +20,7 @@ export async function completeWithModel(input: {
   const model = process.env.AI_MODEL;
 
   if (!apiUrl || !apiKey || !model) {
-    return fallback;
+    return createFallback(input.title, input.fallbackContent, "未配置模型 API，已使用本地兜底策略");
   }
 
   const controller = new AbortController();
@@ -43,7 +46,7 @@ export async function completeWithModel(input: {
     });
 
     if (!response.ok) {
-      return fallback;
+      return createFallback(input.title, input.fallbackContent, "模型接口返回异常，已使用本地兜底策略");
     }
 
     const data = (await response.json()) as {
@@ -53,27 +56,33 @@ export async function completeWithModel(input: {
     const content = data.choices?.[0]?.message?.content?.trim() ?? data.output_text?.trim();
 
     if (!content) {
-      return fallback;
+      return createFallback(input.title, input.fallbackContent, "模型返回内容为空，已使用本地兜底策略");
     }
 
     return {
+      ok: true,
       title: input.title,
       content,
       generatedAt: Date.now(),
-      source: "model"
+      source: "model",
+      fallback: false,
+      message: "模型生成成功"
     };
   } catch {
-    return fallback;
+    return createFallback(input.title, input.fallbackContent, "模型调用失败，已使用本地兜底策略");
   } finally {
     clearTimeout(timeout);
   }
 }
 
-function createFallback(title: string, content: string): AiResult {
+function createFallback(title: string, content: string, message = "已使用本地兜底策略生成结果"): AiResult {
   return {
+    ok: true,
     title,
     content,
     generatedAt: Date.now(),
-    source: "fallback"
+    source: "fallback",
+    fallback: true,
+    message
   };
 }
