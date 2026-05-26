@@ -101,6 +101,7 @@ export function placeBid(input: {
     return {
       bid: previousBid,
       extended: false,
+      settled: false,
       duplicate: true,
       snapshot: getSnapshot()
     };
@@ -110,8 +111,11 @@ export function placeBid(input: {
     throw new Error("竞拍未进行，无法出价");
   }
 
-  if (!auction.endTime || now >= auction.endTime) {
-    settleAuction();
+  if (!auction.endTime) {
+    throw new Error("竞拍已结束，无法出价");
+  }
+
+  if (now >= auction.endTime) {
     throw new Error("竞拍已结束，无法出价");
   }
 
@@ -153,13 +157,15 @@ export function placeBid(input: {
 
   auction.version += 1;
 
+  let settled = false;
   if (auction.currentPrice >= auction.ceilingPrice) {
-    settleAuction();
+    settled = settleAuction().settled;
   }
 
   return {
     bid,
     extended: shouldExtend,
+    settled,
     duplicate: false,
     snapshot: getSnapshot()
   };
@@ -167,7 +173,10 @@ export function placeBid(input: {
 
 export function settleAuction() {
   if (auction.status !== "ACTIVE") {
-    return getSnapshot();
+    return {
+      settled: false,
+      snapshot: getSnapshot()
+    };
   }
 
   auction.version += 1;
@@ -188,7 +197,10 @@ export function settleAuction() {
     auction.status = "UNSOLD";
   }
 
-  return getSnapshot();
+  return {
+    settled: true,
+    snapshot: getSnapshot()
+  };
 }
 
 export function payOrder(orderId: string) {

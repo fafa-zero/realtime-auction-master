@@ -49,6 +49,20 @@
 | 第 13 天 | 录制 3 分钟演示视频，补充提交材料 | 视频链接、提交文档 |
 | 第 14 天 | 全流程彩排，修复明显问题并推送代码 | 最终提交版本 |
 
+## 并行开发分工
+
+| 窗口 | 文件范围 | 任务 |
+| --- | --- | --- |
+| 窗口 A | `apps/web/src/App.tsx`、`apps/web/src/styles.css` | 前端体验、竞拍状态展示、AI 结果面板、多端同步提示、Demo 页面观感 |
+| 窗口 B | `apps/server/src/index.ts`、`apps/server/src/store.ts`、`apps/server/src/ai.ts`、`docs/*.md`、`README.md` | 后端逻辑稳定性、AI fallback 和错误处理、测试清单、演示文档、README 配置说明 |
+
+协作原则：
+
+- A 不改后端，B 不改前端，减少同文件冲突。
+- 前后端联动功能先约定接口字段，再分别实现。
+- 每个小功能一个提交，提交前运行 `npm run typecheck`。
+- 只 `git add` 本次相关文件，避免把其他窗口或临时文件混入提交。
+
 ## 优先级
 
 | 优先级 | 内容 | 原因 |
@@ -63,7 +77,22 @@
 
 ## 测试清单
 
+### 基础验证
+
+- `npm install` 可以安装依赖。
+- `npm run typecheck` 通过。
+- `npm run build` 通过。
+- `npm run dev` 可以同时启动前后端。
+- `GET /api/health` 返回 `ok: true` 和 `serverTime`。
+
+### 竞拍状态机
+
 - 启动竞拍后状态变为 `ACTIVE`。
+- 竞拍开始后当前价重置为起拍价，订单清空，延时次数归零。
+- `PENDING`、`UNSOLD`、`SOLD` 状态可以重新开始竞拍。
+- `ACTIVE` 状态下重复开始竞拍会被拒绝。
+- `PENDING` 或 `ACTIVE` 状态可以取消竞拍。
+- `SOLD`、`UNSOLD`、`CANCELLED` 状态取消竞拍会被拒绝。
 - 出价低于最低合法价格时被拒绝。
 - 出价超过封顶价时被拒绝。
 - 出价等于封顶价时自动成交。
@@ -74,8 +103,31 @@
 - 主播取消竞拍后继续出价被拒绝。
 - 重复点击出价不会重复写入同一请求。
 - 模拟支付后订单状态变为已支付。
+- 重复支付已支付订单不会产生新订单。
+
+### 实时同步
+
 - 多个浏览器能够同步看到最高价和竞拍状态。
+- 成功出价后所有浏览器收到 `auction:bid-success`。
+- 自动延时后所有浏览器收到 `auction:extended`。
+- 封顶成交或倒计时结束后所有浏览器收到 `auction:ended`。
+- 模拟支付后所有浏览器收到 `order:paid` 并同步订单状态。
+
+### AI 助手
+
 - AI 商品讲解、竞拍复盘和风险提示接口可用。
+- 未配置 `AI_API_URL`、`AI_API_KEY`、`AI_MODEL` 时返回本地兜底结果。
+- 模型 API 调用失败、返回非 2xx 或返回空内容时返回本地兜底结果。
+- AI 成功响应包含 `ok`、`title`、`content`、`generatedAt`、`source`、`fallback`、`message`。
+- AI 参数错误响应包含 `ok: false`、`message`、`fallback: true`。
+- 异常出价提示根据封顶价、高频出价或大幅加价返回风险等级。
+
+### 文档和提交材料
+
+- README 包含项目定位、运行方式、环境变量、AI 配置和主要接口说明。
+- `docs/final-demo-submission.md` 包含本地演示步骤、录屏脚本、仓库链接待填写项和提交前检查清单。
+- `docs/test-cases.md` 记录核心功能、边界流程和预期结果。
+- 最终提交前补齐团队信息、Demo 链接、演示视频、仓库链接、性能指标和用户反馈。
 
 ## 后续扩展
 
