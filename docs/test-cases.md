@@ -1,17 +1,21 @@
-# 实时竞拍 MVP 测试用例
+# 实时竞拍 Web + 小程序测试用例
 
 ## 测试范围
 
-本文档用于最终 Demo 前的手工测试记录，覆盖“启动竞拍 → 用户实时出价 → Socket.IO 多端同步 → 自动延时 → 封顶成交 / 倒计时成交 → 生成订单 → 模拟支付 → AI 助手”的核心流程。
+本文档用于最终 Demo 前的手工测试记录，覆盖“Web 主播端开拍 → Web 观众预览 → 小程序演示登录 → 小程序 WebSocket 出价 → 多直播间隔离 → 生成订单 → 我的订单 → 支付权限校验 → AI 助手”的核心流程。
 
 ## 测试环境
 
 | 项目 | 内容 |
 | --- | --- |
-| 前端 | React + Vite，默认 `http://localhost:5173` |
-| 后端 | Express + Socket.IO，默认 `http://localhost:4000` |
-| 存储 | 内存状态 |
+| Web 前端 | React + Vite，默认 `http://localhost:5173`；端口占用时可能为 `http://localhost:5174` |
+| 后端 | Express + Socket.IO + 原生 WebSocket，默认 `http://localhost:4000`；本地演示常用 `http://localhost:4200` |
+| 小程序 | 微信开发者工具打开 `apps/miniprogram` |
+| 小程序 API | `http://localhost:4200`，配置位置 `apps/miniprogram/app.js` |
+| 小程序 WebSocket | `ws://localhost:4200/miniprogram-ws` |
+| 存储 | 本地 JSON 文件，默认 `apps/server/data/auction-state.json` |
 | 浏览器 | Chrome / Edge |
+| 微信开发者工具 | 本地联调时开启“不校验合法域名、web-view、TLS 版本以及 HTTPS 证书” |
 | AI | 未配置模型时使用本地兜底；配置 `AI_API_URL`、`AI_API_KEY`、`AI_MODEL` 后调用兼容 Chat Completions 的模型 API |
 
 ## 执行前检查
@@ -23,14 +27,15 @@
 | PRE-03 | 执行 `npm run build` | 前后端构建通过 | 待执行 |
 | PRE-04 | 执行 `npm run dev` | 前端和后端服务启动成功 | 待执行 |
 | PRE-05 | 访问 `GET /api/health` | 返回 `ok: true` 和 `serverTime` | 待执行 |
+| PRE-06 | 打开 `apps/miniprogram` | 微信开发者工具可加载项目，无项目配置错误 | 待执行 |
 
 ## 核心流程用例
 
 | 编号 | 场景 | 操作步骤 | 预期结果 | 状态 |
 | --- | --- | --- | --- | --- |
-| CORE-01 | 启动竞拍 | 打开前端，点击“开始/重开竞拍” | 状态变为 `ACTIVE`，倒计时开始，当前价重置为起拍价 | 待执行 |
-| CORE-02 | 实时出价 | 用户输入昵称和合法出价，点击出价 | 后端接受出价，当前最高价、领先用户、出价记录更新 | 待执行 |
-| CORE-03 | 多端同步 | 同时打开两个浏览器窗口，在其中一个窗口出价 | 两个窗口同步显示最新快照 | 待执行 |
+| CORE-01 | Web 主播端启动竞拍 | 访问 `/host`，选择直播间，配置时长、最低加价、封顶价后点击“开始/重开竞拍” | 指定直播间状态变为 `ACTIVE`，倒计时开始，当前价重置为起拍价 | 待执行 |
+| CORE-02 | Web 观众预览出价 | 访问 `/live/live-1`，输入昵称和合法出价，点击出价 | 后端接受出价，当前最高价、领先用户、出价记录更新 | 待执行 |
+| CORE-03 | Web 多端同步 | 同时打开 `/host` 和 `/live/live-1`，在其中一个窗口出价 | 两个窗口同步显示最新快照 | 待执行 |
 | CORE-04 | 自动延时 | 在倒计时最后 10 秒内提交有效出价 | 结束时间延长 20 秒，延时次数增加 | 待执行 |
 | CORE-05 | 封顶成交 | 提交 3000 元出价 | 状态变为 `SOLD`，生成待支付订单，只广播一次结束事件 | 待执行 |
 | CORE-06 | 倒计时成交 | 有出价但未达到封顶价，等待倒计时结束 | 状态变为 `SOLD`，以当前最高价生成订单 | 待执行 |
@@ -40,6 +45,40 @@
 | CORE-10 | HTTP 出价降级 | 调用 `POST /api/auction/bids` 提交合法出价 | 返回 `ok: true`、出价记录和最新快照，同时 Socket.IO 广播同步 | 待执行 |
 | CORE-11 | 历史记录 | 完成一场成交后调用 `GET /api/auction/history` | 返回最近竞拍状态、出价记录、成交订单和归档时间 | 待执行 |
 | CORE-12 | 订单列表 | 完成成交并支付后调用 `GET /api/orders` | 返回订单列表，订单状态为 `PAID` | 待执行 |
+
+## 多直播间隔离用例
+
+| 编号 | 场景 | 操作步骤 | 预期结果 | 状态 |
+| --- | --- | --- | --- | --- |
+| ROOM-01 | 直播间列表 | 调用 `GET /api/live-rooms` | 返回至少 `live-1` 和 `live-2` 两个直播间 | 待执行 |
+| ROOM-02 | 独立快照 | 分别调用 `GET /api/live-rooms/live-1/auction` 和 `GET /api/live-rooms/live-2/auction` | 两个快照的 `auction.liveRoomId` 分别为 `live-1` 和 `live-2` | 待执行 |
+| ROOM-03 | 独立开拍 | 在 `/host?liveRoomId=live-1` 开拍，再切到 `/host?liveRoomId=live-2` 开拍 | 两个直播间可分别配置竞拍规则，互不覆盖 | 待执行 |
+| ROOM-04 | Socket.IO room 隔离 | 打开 `/live/live-1` 和 `/live/live-2`，只在 `live-1` 出价 | `live-1` 页面更新，`live-2` 页面不显示 `live-1` 出价 | 待执行 |
+| ROOM-05 | 订单隔离 | `live-2` 封顶成交后分别调用 `/api/live-rooms/live-1/orders` 和 `/api/live-rooms/live-2/orders` | `live-2` 返回新订单，`live-1` 不出现该订单 | 待执行 |
+
+## 小程序登录与 WebSocket 用例
+
+| 编号 | 场景 | 操作步骤 | 预期结果 | 状态 |
+| --- | --- | --- | --- | --- |
+| MP-01 | 小程序演示登录 | 调用 `POST /api/auth/miniprogram/login`，入参包含 `mockCode` 和 `nickname` | 返回 `ok: true`、`token`、`expiresAt` 和用户信息 | 待执行 |
+| MP-02 | 查询当前用户 | 使用 `Authorization: Bearer <token>` 调用 `GET /api/me` | 返回与登录一致的用户昵称和 `role: BUYER` | 待执行 |
+| MP-03 | 小程序直播间列表 | 微信开发者工具打开小程序首页 | 页面完成演示登录，并显示 `live-1`、`live-2` 直播间 | 待执行 |
+| MP-04 | 小程序进入直播间 | 点击 `live-1` 直播间 | 页面展示模拟直播画面、商品、当前价、倒计时和出价记录 | 待执行 |
+| MP-05 | WebSocket 连接 | 小程序进入直播间后观察页面实时状态文本 | 显示“实时已连接”或“实时同步中”，后端接受 `auction:join` | 待执行 |
+| MP-06 | 小程序 WebSocket 出价 | Web 主播端开拍后，小程序输入合法价格并出价 | 小程序通过 `wx.connectSocket` 发送 `auction:bid`，收到 `auction:bid-success` 后页面价格更新 | 待执行 |
+| MP-07 | Web + 小程序同步 | Web 观众预览页出价后观察小程序；小程序出价后观察 Web 预览页 | 两端均能收到同一直播间最新竞拍快照 | 待执行 |
+| MP-08 | WebSocket 断开兜底 | 临时断开 WebSocket 或关闭后端再恢复 | 小程序显示断开提示，并降级为 REST 轮询获取快照 | 待执行 |
+
+## 我的订单与支付权限用例
+
+| 编号 | 场景 | 操作步骤 | 预期结果 | 状态 |
+| --- | --- | --- | --- | --- |
+| ORDER-01 | 我的订单为空 | 新小程序用户未成交前调用 `GET /api/me/orders?liveRoomId=live-1` | 返回 `ok: true`，`items` 为空数组 | 待执行 |
+| ORDER-02 | 成交后我的订单 | 小程序用户封顶出价成交后调用 `GET /api/me/orders?liveRoomId=live-1` | 返回 1 条当前用户订单，`buyerUserId` 为当前用户 ID | 待执行 |
+| ORDER-03 | 小程序订单页 | 成交后进入小程序“我的订单” | 展示订单号、成交价和待支付/已支付状态 | 待执行 |
+| ORDER-04 | 本人模拟支付 | 成交用户携带自己的 token 调用 `POST /api/orders/:orderId/pay` | 返回 `ok: true`，订单状态变为 `PAID` | 待执行 |
+| ORDER-05 | 支付权限校验 | 用户 A 成交后，用户 B 携带自己的 token 调用同一订单支付接口 | 返回 403，提示“只能支付自己的订单”，订单状态不被修改 | 待执行 |
+| ORDER-06 | 未登录支付兼容 | Web 演示端不带 token 调用支付接口 | 保持原 Web 演示兼容，可以模拟支付订单 | 待执行 |
 
 ## 边界与异常用例
 
@@ -53,6 +92,8 @@
 | EDGE-06 | 主播取消 | `ACTIVE` 状态点击取消竞拍 | 状态变为 `CANCELLED`，后续出价被拒绝 | 待执行 |
 | EDGE-07 | 重复支付 | 已支付订单再次调用支付接口 | 返回已支付订单，不生成新订单 | 待执行 |
 | EDGE-08 | 错误订单支付 | 使用不存在的订单 ID 调用支付接口 | 返回错误提示“订单不存在” | 待执行 |
+| EDGE-09 | 小程序缺少 token 出价 | 小程序 WebSocket 出价消息不带 `token` | 返回 `auction:error`，提示登录失效或 token 缺失 | 待执行 |
+| EDGE-10 | 小程序加入不存在直播间 | WebSocket 发送 `auction:join`，`liveRoomId` 为不存在的值 | 返回 `auction:error`，提示直播间不存在 | 待执行 |
 
 ## AI 助手用例
 
@@ -74,10 +115,13 @@
 | DOC-03 | 团队信息 | 团队名称、成员名单、分工说明已填写真实信息 | 待填写 |
 | DOC-04 | 链接材料 | 在线 Demo、演示视频、源代码仓库链接已填写 | 待填写 |
 | DOC-05 | 实测结果 | 性能指标、用户反馈、最终提交 hash 已填写 | 待填写 |
+| DOC-06 | Git 提交规则 | README 包含“一个小功能一个 commit”、typecheck/build 和 commit 前缀规则 | 待确认 |
+| DOC-07 | 小程序联调说明 | `apps/miniprogram/README.md` 包含 request / WebSocket 本地地址和开发者工具设置 | 待确认 |
 
 ## 已知边界
 
-- 当前 MVP 使用内存状态，服务重启后竞拍记录和订单会重置。
+- 当前使用本地 JSON 文件持久化，适合单机演示；生产环境应替换为数据库。
 - 当前支付为模拟支付，不接入真实支付网关。
-- 当前不接入真实抖音电商 API，直播间和用户身份均为模拟数据。
-- 当前单机 Node.js 进程适合演示业务闭环；生产级高并发竞价需要 Redis 原子操作、消息队列和数据库事务等扩展。
+- 当前小程序登录使用 `mockCode` 演示模式，真实上线需要接 `wx.login` 和 `code2Session`。
+- 当前直播流为模拟画面，不接入真实推流 / 拉流服务。
+- 当前单机 Node.js 进程适合演示业务闭环；生产级高并发竞价需要 Redis 原子操作、消息队列、数据库事务和多实例 WebSocket 广播等扩展。
