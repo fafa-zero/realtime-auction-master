@@ -12,11 +12,17 @@ import {
   getAuction,
   getSnapshot,
   getLiveRoom,
+  getLiveRooms,
+  getOrder,
   getOrders,
+  getOrdersForUser,
+  getUserByToken,
+  loginMiniprogram,
   payOrder,
   placeBid,
   settleAuction,
-  startAuction
+  startAuction,
+  updateUserProfileByToken
 } from "./store.js";
 
 const PORT = Number(process.env.PORT ?? 4000);
@@ -39,8 +45,72 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true, serverTime: Date.now() });
 });
 
+app.post("/api/auth/miniprogram/login", (req, res) => {
+  try {
+    const schema = z.object({
+      code: z.string().min(1).optional(),
+      mockCode: z.string().min(1).optional(),
+      nickname: z.string().min(1).max(40).optional(),
+      avatarUrl: z.string().max(500).optional()
+    });
+    const input = schema.parse(req.body ?? {});
+    const result = loginMiniprogram(input);
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    res.status(400).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
+app.get("/api/me", (req, res) => {
+  try {
+    const user = getUserByToken(getAuthToken(req));
+    res.json({ ok: true, user });
+  } catch (error) {
+    res.status(401).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
+app.patch("/api/me/profile", (req, res) => {
+  try {
+    const schema = z.object({
+      nickname: z.string().min(1).max(40).optional(),
+      avatarUrl: z.string().max(500).optional()
+    });
+    const input = schema.parse(req.body ?? {});
+    const user = updateUserProfileByToken(getAuthToken(req), input);
+    res.json({ ok: true, user });
+  } catch (error) {
+    res.status(400).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
+app.get("/api/me/orders", (req, res) => {
+  try {
+    const user = getUserByToken(getAuthToken(req));
+    const liveRoomId = typeof req.query.liveRoomId === "string" ? req.query.liveRoomId : undefined;
+
+    if (liveRoomId) {
+      assertLiveRoom(liveRoomId);
+    }
+
+    res.json({
+      ok: true,
+      items: getOrdersForUser(user.id, liveRoomId)
+    });
+  } catch (error) {
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
 app.get("/api/auction", (_req, res) => {
   res.json(getSnapshot());
+});
+
+app.get("/api/live-rooms", (_req, res) => {
+  res.json({
+    ok: true,
+    items: getLiveRooms()
+  });
 });
 
 app.get("/api/live-rooms/default", (_req, res) => {
@@ -55,7 +125,7 @@ app.get("/api/live-rooms/:liveRoomId", (req, res) => {
     assertLiveRoom(req.params.liveRoomId);
     res.json({
       ok: true,
-      room: getLiveRoom()
+      room: getLiveRoom(req.params.liveRoomId)
     });
   } catch (error) {
     res.status(404).json({ ok: false, message: getErrorMessage(error) });
@@ -65,7 +135,7 @@ app.get("/api/live-rooms/:liveRoomId", (req, res) => {
 app.get("/api/live-rooms/:liveRoomId/auction", (req, res) => {
   try {
     assertLiveRoom(req.params.liveRoomId);
-    res.json(getSnapshot());
+    res.json(getSnapshot(req.params.liveRoomId));
   } catch (error) {
     res.status(404).json({ ok: false, message: getErrorMessage(error) });
   }
@@ -78,11 +148,35 @@ app.get("/api/auction/history", (_req, res) => {
   });
 });
 
+app.get("/api/live-rooms/:liveRoomId/auction/history", (req, res) => {
+  try {
+    assertLiveRoom(req.params.liveRoomId);
+    res.json({
+      ok: true,
+      items: getAuctionHistory(req.params.liveRoomId)
+    });
+  } catch (error) {
+    res.status(404).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
 app.get("/api/orders", (_req, res) => {
   res.json({
     ok: true,
     items: getOrders()
   });
+});
+
+app.get("/api/live-rooms/:liveRoomId/orders", (req, res) => {
+  try {
+    assertLiveRoom(req.params.liveRoomId);
+    res.json({
+      ok: true,
+      items: getOrders(req.params.liveRoomId)
+    });
+  } catch (error) {
+    res.status(404).json({ ok: false, message: getErrorMessage(error) });
+  }
 });
 
 app.post("/api/auction/start", (req, res) => {
@@ -117,7 +211,7 @@ function handleStartAuction(body: unknown, liveRoomId: string, res: express.Resp
         .optional()
     });
     const input = schema.parse(body ?? {});
-    const snapshot = startAuction(input);
+    const snapshot = startAuction(liveRoomId, input);
     io.to(getLiveRoomSocketRoom(liveRoomId)).emit("auction:started", snapshot);
     res.json(snapshot);
   } catch (error) {
@@ -140,7 +234,7 @@ function handleCancelAuction(body: unknown, liveRoomId: string, res: express.Res
       reason: z.string().min(1).optional()
     });
     const input = schema.parse(body);
-    const result = cancelAuction(input.reason);
+    const result = cancelAuction(liveRoomId, input.reason);
     io.to(getLiveRoomSocketRoom(liveRoomId)).emit("auction:cancelled", result);
     res.json(result.snapshot);
   } catch (error) {
@@ -159,14 +253,16 @@ app.post("/api/live-rooms/:liveRoomId/auction/bids", (req, res) => {
 function handlePlaceBid(body: unknown, liveRoomId: string, res: express.Response) {
   try {
     assertLiveRoom(liveRoomId);
+    const authUser = getOptionalAuthUser(res.req);
     const schema = z.object({
-      userId: z.string().min(1, "用户 ID 不能为空"),
-      nickname: z.string().min(1, "昵称不能为空"),
+      userId: z.string().min(1, "用户 ID 不能为空").optional(),
+      nickname: z.string().min(1, "昵称不能为空").optional(),
       price: z.number({ invalid_type_error: "出价金额必须是数字" }).positive("出价金额必须大于 0"),
       clientRequestId: z.string().min(1, "请求 ID 不能为空")
     });
     const input = schema.parse(body);
-    const result = placeBid(input);
+    const bidder = resolveBidder(input, authUser);
+    const result = placeBid({ ...input, ...bidder, liveRoomId });
     const room = getLiveRoomSocketRoom(liveRoomId);
 
     io.to(room).emit("auction:bid-success", result.snapshot);
@@ -194,8 +290,17 @@ function handlePlaceBid(body: unknown, liveRoomId: string, res: express.Response
 
 app.post("/api/orders/:orderId/pay", (req, res) => {
   try {
+    const authUser = getOptionalAuthUser(req);
+    const order = getOrder(req.params.orderId);
+
+    if (authUser && order.buyerUserId !== authUser.id) {
+      res.status(403).json({ ok: false, message: "只能支付自己的订单" });
+      return;
+    }
+
     const paidOrder = payOrder(req.params.orderId);
-    const snapshot = getSnapshot();
+    const liveRoom = getLiveRooms().find((room) => room.currentAuctionId === paidOrder.auctionId);
+    const snapshot = getSnapshot(liveRoom?.id ?? DEFAULT_LIVE_ROOM_ID);
     io.to(getLiveRoomSocketRoom(snapshot.auction.liveRoomId)).emit("order:paid", snapshot);
     res.json({
       ...paidOrder,
@@ -208,17 +313,20 @@ app.post("/api/orders/:orderId/pay", (req, res) => {
   }
 });
 
-app.post("/api/ai/product-script", async (_req, res) => {
-  res.json(await generateProductScript());
+app.post("/api/ai/product-script", async (req, res) => {
+  const liveRoomId = getLiveRoomIdFromRequest(req.body);
+  res.json(await generateProductScript(liveRoomId));
 });
 
-app.post("/api/ai/auction-summary", async (_req, res) => {
-  res.json(await generateAuctionSummary());
+app.post("/api/ai/auction-summary", async (req, res) => {
+  const liveRoomId = getLiveRoomIdFromRequest(req.body);
+  res.json(await generateAuctionSummary(liveRoomId));
 });
 
 app.post("/api/ai/bid-risk", async (req, res) => {
   try {
     const schema = z.object({
+      liveRoomId: z.string().min(1).optional(),
       userId: z.string().min(1),
       price: z.number().positive()
     });
@@ -230,7 +338,6 @@ app.post("/api/ai/bid-risk", async (req, res) => {
 });
 
 io.on("connection", (socket) => {
-  socket.join(getLiveRoomSocketRoom(DEFAULT_LIVE_ROOM_ID));
   socket.emit("auction:snapshot", getSnapshot());
 
   socket.on("auction:join", (payload?: { liveRoomId?: string }) => {
@@ -242,20 +349,30 @@ io.on("connection", (socket) => {
       return;
     }
 
+    for (const room of socket.rooms) {
+      if (room.startsWith("room:live:")) {
+        socket.leave(room);
+      }
+    }
+
     socket.join(getLiveRoomSocketRoom(liveRoomId));
-    socket.emit("auction:snapshot", getSnapshot());
+    socket.emit("auction:snapshot", getSnapshot(liveRoomId));
   });
 
   socket.on("auction:bid", (payload, callback) => {
     try {
       const schema = z.object({
-        userId: z.string().min(1),
-        nickname: z.string().min(1),
+        liveRoomId: z.string().min(1).optional(),
+        userId: z.string().min(1).optional(),
+        nickname: z.string().min(1).optional(),
         price: z.number().positive(),
+        token: z.string().min(1).optional(),
         clientRequestId: z.string().min(1)
       });
       const input = schema.parse(payload);
-      const result = placeBid(input);
+      const authUser = input.token ? getUserByToken(input.token) : null;
+      const bidder = resolveBidder(input, authUser);
+      const result = placeBid({ ...input, ...bidder });
       const room = getLiveRoomSocketRoom(result.snapshot.auction.liveRoomId);
 
       io.to(room).emit("auction:bid-success", result.snapshot);
@@ -276,17 +393,19 @@ io.on("connection", (socket) => {
 });
 
 setInterval(() => {
-  const auction = getAuction();
+  for (const liveRoom of getLiveRooms()) {
+    const auction = getAuction(liveRoom.id);
 
-  if (auction.status !== "ACTIVE" || !auction.endTime) {
-    return;
-  }
+    if (auction.status !== "ACTIVE" || !auction.endTime) {
+      continue;
+    }
 
-  if (Date.now() >= auction.endTime) {
-    const result = settleAuction();
+    if (Date.now() >= auction.endTime) {
+      const result = settleAuction(liveRoom.id);
 
-    if (result.settled) {
-      io.to(getLiveRoomSocketRoom(auction.liveRoomId)).emit("auction:ended", result.snapshot);
+      if (result.settled) {
+        io.to(getLiveRoomSocketRoom(liveRoom.id)).emit("auction:ended", result.snapshot);
+      }
     }
   }
 }, 500);
@@ -307,6 +426,11 @@ function getErrorMessage(error: unknown) {
   return "操作失败";
 }
 
+function getErrorStatus(error: unknown) {
+  const message = getErrorMessage(error);
+  return message.includes("直播间不存在") ? 404 : 401;
+}
+
 function createAiErrorResponse(message: string) {
   return {
     ok: false,
@@ -320,7 +444,49 @@ function getLiveRoomSocketRoom(liveRoomId: string) {
 }
 
 function assertLiveRoom(liveRoomId: string) {
-  if (liveRoomId !== getLiveRoom().id) {
-    throw new Error("直播间不存在");
+  getLiveRoom(liveRoomId);
+}
+
+function getLiveRoomIdFromRequest(body: unknown) {
+  const result = z.object({ liveRoomId: z.string().min(1).optional() }).safeParse(body);
+  return result.success ? result.data.liveRoomId : undefined;
+}
+
+function getAuthToken(req: express.Request) {
+  const auth = req.headers.authorization;
+
+  if (!auth?.startsWith("Bearer ")) {
+    throw new Error("缺少登录 token");
   }
+
+  return auth.slice("Bearer ".length).trim();
+}
+
+function getOptionalAuthUser(req: express.Request) {
+  try {
+    return getUserByToken(getAuthToken(req));
+  } catch {
+    return null;
+  }
+}
+
+function resolveBidder(
+  input: { userId?: string; nickname?: string },
+  authUser: { id: string; nickname: string } | null
+) {
+  if (authUser) {
+    return {
+      userId: authUser.id,
+      nickname: authUser.nickname
+    };
+  }
+
+  if (!input.userId || !input.nickname) {
+    throw new Error("用户 ID 和昵称不能为空");
+  }
+
+  return {
+    userId: input.userId,
+    nickname: input.nickname
+  };
 }

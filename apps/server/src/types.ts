@@ -16,6 +16,21 @@ export interface LiveRoom {
   currentAuctionId: string;
 }
 
+export interface User {
+  id: string;
+  openId: string;
+  nickname: string;
+  avatarUrl: string;
+  role: "BUYER" | "HOST" | "ADMIN";
+  createdAt: number;
+}
+
+export interface Session {
+  token: string;
+  userId: string;
+  expiresAt: number;
+}
+
 export interface Bid {
   id: string;
   auctionId: string;
