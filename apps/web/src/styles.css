@@ -90,6 +90,42 @@ button:disabled {
   margin-bottom: 18px;
 }
 
+.topbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  align-items: center;
+}
+
+.mode-switch {
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.mode-switch button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  border: 0;
+  padding: 0 10px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.mode-switch button.active {
+  color: #fff;
+  background: var(--ink);
+}
+
 .eyebrow {
   margin: 0 0 6px;
   color: var(--accent);
@@ -437,6 +473,26 @@ h2 {
   color: var(--green);
 }
 
+.buyer-guide {
+  background: #f8fbff;
+}
+
+.buyer-guide-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 12px;
+  font-size: 13px;
+}
+
+.buyer-guide-grid span {
+  color: var(--muted);
+}
+
+.buyer-guide-grid strong {
+  text-align: right;
+  word-break: break-word;
+}
+
 .primary-button {
   width: 100%;
   border-color: var(--accent);
@@ -730,6 +786,20 @@ h2 {
   .topbar,
   .product-strip {
     flex-direction: column;
+  }
+
+  .topbar-actions {
+    justify-content: stretch;
+    width: 100%;
+  }
+
+  .mode-switch,
+  .connection {
+    width: 100%;
+  }
+
+  .connection {
+    justify-content: center;
   }
 
   .sync-strip {

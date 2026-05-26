@@ -16,6 +16,7 @@ import {
   Timer,
   TrendingUp,
   UserCheck,
+  Users,
   Wifi,
   WifiOff
 } from "lucide-react";
@@ -52,6 +53,7 @@ type PayOrderResponse =
     };
 
 type AiTask = "script" | "summary" | "risk";
+type ViewMode = "host" | "buyer";
 
 const aiTaskText: Record<AiTask, string> = {
   script: "讲解词",
@@ -68,6 +70,7 @@ const demoBidders = [
 export function App() {
   const [snapshot, setSnapshot] = useState<AuctionSnapshot | null>(null);
   const [connected, setConnected] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("host");
   const [userId] = useState(() => `user-${Math.floor(Math.random() * 9000 + 1000)}`);
   const [nickname, setNickname] = useState(() => `用户${Math.floor(Math.random() * 90 + 10)}`);
   const [bidPrice, setBidPrice] = useState("");
@@ -406,12 +409,30 @@ export function App() {
         <div className="topbar">
           <div>
             <p className="eyebrow">实时竞拍大师</p>
-            <h1>直播间竞拍控制台</h1>
+            <h1>{viewMode === "host" ? "直播间竞拍控制台" : "观众实时竞拍台"}</h1>
             <p className="topbar-meta">{syncLabel} / Socket.IO 多端广播</p>
           </div>
-          <div className={connected ? "connection online" : "connection offline"}>
-            {connected ? <Wifi size={18} /> : <WifiOff size={18} />}
-            {connected ? "实时连接" : "重连中"}
+          <div className="topbar-actions">
+            <div className="mode-switch" aria-label="视图切换">
+              <button
+                className={viewMode === "host" ? "active" : ""}
+                onClick={() => setViewMode("host")}
+              >
+                <Radio size={16} />
+                主播端
+              </button>
+              <button
+                className={viewMode === "buyer" ? "active" : ""}
+                onClick={() => setViewMode("buyer")}
+              >
+                <Users size={16} />
+                观众端
+              </button>
+            </div>
+            <div className={connected ? "connection online" : "connection offline"}>
+              {connected ? <Wifi size={18} /> : <WifiOff size={18} />}
+              {connected ? "实时连接" : "重连中"}
+            </div>
           </div>
         </div>
 
@@ -498,10 +519,27 @@ export function App() {
           ) : null}
         </section>
 
+        {viewMode === "buyer" ? (
+          <section className="panel-section buyer-guide">
+            <div className="section-title">
+              <Users size={18} />
+              <h2>观众提醒</h2>
+            </div>
+            <div className="buyer-guide-grid">
+              <span>领先用户</span>
+              <strong>{snapshot.auction.winnerNickname ?? "暂无"}</strong>
+              <span>下一口价</span>
+              <strong>{formatMoney(nextBid)}</strong>
+              <span>我的身份</span>
+              <strong>{nickname}</strong>
+            </div>
+          </section>
+        ) : null}
+
         <section className="panel-section">
           <div className="section-title">
             <CircleDollarSign size={18} />
-            <h2>用户出价</h2>
+            <h2>{viewMode === "host" ? "用户出价" : "我要出价"}</h2>
           </div>
           <label className="field">
             <span>昵称</span>
@@ -527,100 +565,108 @@ export function App() {
           </button>
         </section>
 
-        <section className="panel-section demo-panel">
-          <div className="section-title">
-            <Flame size={18} />
-            <h2>演示出价工具</h2>
-          </div>
-          <div className="demo-bid-grid">
-            {demoBidders.map((bidder) => (
+        {viewMode === "host" ? (
+          <>
+            <section className="panel-section demo-panel">
+              <div className="section-title">
+                <Flame size={18} />
+                <h2>演示出价工具</h2>
+              </div>
+              <div className="demo-bid-grid">
+                {demoBidders.map((bidder) => (
+                  <button
+                    disabled={snapshot.auction.status !== "ACTIVE" || !connected}
+                    key={bidder.userId}
+                    onClick={() => placeDemoBid(bidder)}
+                  >
+                    <span>{bidder.nickname}</span>
+                    <strong>
+                      +{formatMoney(snapshot.auction.incrementStep * bidder.stepMultiplier)}
+                    </strong>
+                  </button>
+                ))}
+              </div>
               <button
+                className="ceiling-button"
                 disabled={snapshot.auction.status !== "ACTIVE" || !connected}
-                key={bidder.userId}
-                onClick={() => placeDemoBid(bidder)}
+                onClick={placeCeilingBid}
               >
-                <span>{bidder.nickname}</span>
-                <strong>
-                  +{formatMoney(snapshot.auction.incrementStep * bidder.stepMultiplier)}
-                </strong>
+                封顶出价 {formatMoney(snapshot.auction.ceilingPrice)}
               </button>
-            ))}
-          </div>
-          <button
-            className="ceiling-button"
-            disabled={snapshot.auction.status !== "ACTIVE" || !connected}
-            onClick={placeCeilingBid}
-          >
-            封顶出价 {formatMoney(snapshot.auction.ceilingPrice)}
-          </button>
-        </section>
+            </section>
 
-        <section className="panel-section">
-          <div className="section-title">
-            <Bot size={18} />
-            <h2>AI 竞拍助手</h2>
-          </div>
-          <div className="button-row ai-actions">
-            <button disabled={aiLoading} onClick={() => runAiTask("script")}>
-              <FileText size={16} />
-              <span>{aiTask === "script" ? "生成中" : "讲解词"}</span>
-            </button>
-            <button disabled={aiLoading} onClick={() => runAiTask("summary")}>
-              <BarChart3 size={16} />
-              <span>{aiTask === "summary" ? "生成中" : "竞拍复盘"}</span>
-            </button>
-            <button disabled={aiLoading} onClick={() => runAiTask("risk")}>
-              <ShieldAlert size={16} />
-              <span>{aiTask === "risk" ? "生成中" : "风险提示"}</span>
-            </button>
-          </div>
-          {aiLoading ? (
-            <div className="ai-box ai-loading">
-              <div className="ai-title">
-                <Sparkles className="spin" size={16} />
-                <strong>{aiTask ? `${aiTaskText[aiTask]}生成中` : "AI 助手生成中"}</strong>
+            <section className="panel-section">
+              <div className="section-title">
+                <Bot size={18} />
+                <h2>AI 竞拍助手</h2>
               </div>
-              <p>正在结合当前竞拍状态生成可演示结果。</p>
-            </div>
-          ) : aiResult ? (
-            <div className="ai-box">
-              <div className="ai-title">
-                {aiResult.level ? <ShieldAlert size={16} /> : <Bot size={16} />}
-                <strong>{aiResult.title}</strong>
+              <div className="button-row ai-actions">
+                <button disabled={aiLoading} onClick={() => runAiTask("script")}>
+                  <FileText size={16} />
+                  <span>{aiTask === "script" ? "生成中" : "讲解词"}</span>
+                </button>
+                <button disabled={aiLoading} onClick={() => runAiTask("summary")}>
+                  <BarChart3 size={16} />
+                  <span>{aiTask === "summary" ? "生成中" : "竞拍复盘"}</span>
+                </button>
+                <button disabled={aiLoading} onClick={() => runAiTask("risk")}>
+                  <ShieldAlert size={16} />
+                  <span>{aiTask === "risk" ? "生成中" : "风险提示"}</span>
+                </button>
               </div>
-              <div className="ai-meta">
-                <span className={`source-badge source-${aiResult.source}`}>
-                  {aiResult.source === "model" ? "模型生成" : "本地兜底"}
-                </span>
-                {aiResult.level ? (
-                  <span className={`risk-badge risk-${getRiskClass(aiResult.level)}`}>
-                    风险{aiResult.level}
-                  </span>
-                ) : null}
-                <span>{formatTime(aiResult.generatedAt)}</span>
-              </div>
-              <p className="ai-content">{aiResult.content}</p>
-            </div>
-          ) : (
-            <div className="ai-empty">
-              <Sparkles size={18} />
-              <p>可生成商品讲解词、竞拍复盘或异常出价提示。</p>
-            </div>
-          )}
-        </section>
+              {aiLoading ? (
+                <div className="ai-box ai-loading">
+                  <div className="ai-title">
+                    <Sparkles className="spin" size={16} />
+                    <strong>{aiTask ? `${aiTaskText[aiTask]}生成中` : "AI 助手生成中"}</strong>
+                  </div>
+                  <p>正在结合当前竞拍状态生成可演示结果。</p>
+                </div>
+              ) : aiResult ? (
+                <div className="ai-box">
+                  <div className="ai-title">
+                    {aiResult.level ? <ShieldAlert size={16} /> : <Bot size={16} />}
+                    <strong>{aiResult.title}</strong>
+                  </div>
+                  <div className="ai-meta">
+                    <span className={`source-badge source-${aiResult.source}`}>
+                      {aiResult.source === "model" ? "模型生成" : "本地兜底"}
+                    </span>
+                    {aiResult.level ? (
+                      <span className={`risk-badge risk-${getRiskClass(aiResult.level)}`}>
+                        风险{aiResult.level}
+                      </span>
+                    ) : null}
+                    <span>{formatTime(aiResult.generatedAt)}</span>
+                  </div>
+                  <p className="ai-content">{aiResult.content}</p>
+                </div>
+              ) : (
+                <div className="ai-empty">
+                  <Sparkles size={18} />
+                  <p>可生成商品讲解词、竞拍复盘或异常出价提示。</p>
+                </div>
+              )}
+            </section>
 
-        <section className="panel-section">
-          <div className="section-title">
-            <RotateCcw size={18} />
-            <h2>主播操作</h2>
-          </div>
-          <div className="button-row">
-            <button onClick={startAuction}>开始/重开竞拍</button>
-            <button className="danger" disabled={snapshot.auction.status !== "ACTIVE"} onClick={cancelAuction}>
-              取消竞拍
-            </button>
-          </div>
-        </section>
+            <section className="panel-section">
+              <div className="section-title">
+                <RotateCcw size={18} />
+                <h2>主播操作</h2>
+              </div>
+              <div className="button-row">
+                <button onClick={startAuction}>开始/重开竞拍</button>
+                <button
+                  className="danger"
+                  disabled={snapshot.auction.status !== "ACTIVE"}
+                  onClick={cancelAuction}
+                >
+                  取消竞拍
+                </button>
+              </div>
+            </section>
+          </>
+        ) : null}
 
         <section className="panel-section">
           <div className="section-title">
