@@ -21,7 +21,7 @@ import {
 
 const PORT = Number(process.env.PORT ?? 4000);
 const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5173";
-const ROOM_ID = "auction-1";
+const DEFAULT_LIVE_ROOM_ID = "live-1";
 
 const app = express();
 app.use(cors({ origin: CLIENT_URL }));
@@ -50,6 +50,27 @@ app.get("/api/live-rooms/default", (_req, res) => {
   });
 });
 
+app.get("/api/live-rooms/:liveRoomId", (req, res) => {
+  try {
+    assertLiveRoom(req.params.liveRoomId);
+    res.json({
+      ok: true,
+      room: getLiveRoom()
+    });
+  } catch (error) {
+    res.status(404).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
+app.get("/api/live-rooms/:liveRoomId/auction", (req, res) => {
+  try {
+    assertLiveRoom(req.params.liveRoomId);
+    res.json(getSnapshot());
+  } catch (error) {
+    res.status(404).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
 app.get("/api/auction/history", (_req, res) => {
   res.json({
     ok: true,
@@ -65,7 +86,16 @@ app.get("/api/orders", (_req, res) => {
 });
 
 app.post("/api/auction/start", (req, res) => {
+  handleStartAuction(req.body, DEFAULT_LIVE_ROOM_ID, res);
+});
+
+app.post("/api/live-rooms/:liveRoomId/auction/start", (req, res) => {
+  handleStartAuction(req.body, req.params.liveRoomId, res);
+});
+
+function handleStartAuction(body: unknown, liveRoomId: string, res: express.Response) {
   try {
+    assertLiveRoom(liveRoomId);
     const schema = z.object({
       durationSeconds: z
         .number({ invalid_type_error: "竞拍时长必须是数字" })
@@ -86,48 +116,67 @@ app.post("/api/auction/start", (req, res) => {
         .max(10_000_000, "封顶价不能超过 10000000 元")
         .optional()
     });
-    const input = schema.parse(req.body ?? {});
+    const input = schema.parse(body ?? {});
     const snapshot = startAuction(input);
-    io.to(ROOM_ID).emit("auction:started", snapshot);
+    io.to(getLiveRoomSocketRoom(liveRoomId)).emit("auction:started", snapshot);
     res.json(snapshot);
   } catch (error) {
     res.status(400).json({ message: getErrorMessage(error) });
   }
-});
+}
 
 app.post("/api/auction/cancel", (req, res) => {
+  handleCancelAuction(req.body, DEFAULT_LIVE_ROOM_ID, res);
+});
+
+app.post("/api/live-rooms/:liveRoomId/auction/cancel", (req, res) => {
+  handleCancelAuction(req.body, req.params.liveRoomId, res);
+});
+
+function handleCancelAuction(body: unknown, liveRoomId: string, res: express.Response) {
   try {
+    assertLiveRoom(liveRoomId);
     const schema = z.object({
       reason: z.string().min(1).optional()
     });
-    const input = schema.parse(req.body);
+    const input = schema.parse(body);
     const result = cancelAuction(input.reason);
-    io.to(ROOM_ID).emit("auction:cancelled", result);
+    io.to(getLiveRoomSocketRoom(liveRoomId)).emit("auction:cancelled", result);
     res.json(result.snapshot);
   } catch (error) {
     res.status(400).json({ message: getErrorMessage(error) });
   }
-});
+}
 
 app.post("/api/auction/bids", (req, res) => {
+  handlePlaceBid(req.body, DEFAULT_LIVE_ROOM_ID, res);
+});
+
+app.post("/api/live-rooms/:liveRoomId/auction/bids", (req, res) => {
+  handlePlaceBid(req.body, req.params.liveRoomId, res);
+});
+
+function handlePlaceBid(body: unknown, liveRoomId: string, res: express.Response) {
   try {
+    assertLiveRoom(liveRoomId);
     const schema = z.object({
       userId: z.string().min(1, "用户 ID 不能为空"),
       nickname: z.string().min(1, "昵称不能为空"),
       price: z.number({ invalid_type_error: "出价金额必须是数字" }).positive("出价金额必须大于 0"),
       clientRequestId: z.string().min(1, "请求 ID 不能为空")
     });
-    const input = schema.parse(req.body);
+    const input = schema.parse(body);
     const result = placeBid(input);
+    const room = getLiveRoomSocketRoom(liveRoomId);
 
-    io.to(ROOM_ID).emit("auction:bid-success", result.snapshot);
+    io.to(room).emit("auction:bid-success", result.snapshot);
 
     if (result.extended) {
-      io.to(ROOM_ID).emit("auction:extended", result.snapshot);
+      io.to(room).emit("auction:extended", result.snapshot);
     }
 
     if (result.settled) {
-      io.to(ROOM_ID).emit("auction:ended", result.snapshot);
+      io.to(room).emit("auction:ended", result.snapshot);
     }
 
     res.json({
@@ -141,13 +190,13 @@ app.post("/api/auction/bids", (req, res) => {
   } catch (error) {
     res.status(400).json({ ok: false, message: getErrorMessage(error) });
   }
-});
+}
 
 app.post("/api/orders/:orderId/pay", (req, res) => {
   try {
     const paidOrder = payOrder(req.params.orderId);
     const snapshot = getSnapshot();
-    io.to(ROOM_ID).emit("order:paid", snapshot);
+    io.to(getLiveRoomSocketRoom(snapshot.auction.liveRoomId)).emit("order:paid", snapshot);
     res.json({
       ...paidOrder,
       ok: true,
@@ -181,11 +230,19 @@ app.post("/api/ai/bid-risk", async (req, res) => {
 });
 
 io.on("connection", (socket) => {
-  socket.join(ROOM_ID);
+  socket.join(getLiveRoomSocketRoom(DEFAULT_LIVE_ROOM_ID));
   socket.emit("auction:snapshot", getSnapshot());
 
-  socket.on("auction:join", () => {
-    socket.join(ROOM_ID);
+  socket.on("auction:join", (payload?: { liveRoomId?: string }) => {
+    const liveRoomId = payload?.liveRoomId ?? DEFAULT_LIVE_ROOM_ID;
+    try {
+      assertLiveRoom(liveRoomId);
+    } catch (error) {
+      socket.emit("auction:error", { message: getErrorMessage(error) });
+      return;
+    }
+
+    socket.join(getLiveRoomSocketRoom(liveRoomId));
     socket.emit("auction:snapshot", getSnapshot());
   });
 
@@ -199,15 +256,16 @@ io.on("connection", (socket) => {
       });
       const input = schema.parse(payload);
       const result = placeBid(input);
+      const room = getLiveRoomSocketRoom(result.snapshot.auction.liveRoomId);
 
-      io.to(ROOM_ID).emit("auction:bid-success", result.snapshot);
+      io.to(room).emit("auction:bid-success", result.snapshot);
 
       if (result.extended) {
-        io.to(ROOM_ID).emit("auction:extended", result.snapshot);
+        io.to(room).emit("auction:extended", result.snapshot);
       }
 
       if (result.settled) {
-        io.to(ROOM_ID).emit("auction:ended", result.snapshot);
+        io.to(room).emit("auction:ended", result.snapshot);
       }
 
       callback?.({ ok: true, bid: result.bid });
@@ -228,7 +286,7 @@ setInterval(() => {
     const result = settleAuction();
 
     if (result.settled) {
-      io.to(ROOM_ID).emit("auction:ended", result.snapshot);
+      io.to(getLiveRoomSocketRoom(auction.liveRoomId)).emit("auction:ended", result.snapshot);
     }
   }
 }, 500);
@@ -255,4 +313,14 @@ function createAiErrorResponse(message: string) {
     message,
     fallback: true
   };
+}
+
+function getLiveRoomSocketRoom(liveRoomId: string) {
+  return `room:live:${liveRoomId}`;
+}
+
+function assertLiveRoom(liveRoomId: string) {
+  if (liveRoomId !== getLiveRoom().id) {
+    throw new Error("直播间不存在");
+  }
 }
