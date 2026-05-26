@@ -110,6 +110,7 @@ AI_MODEL=your_model_name
 ## 主要接口
 
 - `GET /api/health`：健康检查。
+- `GET /api/live-rooms/default`：获取默认模拟直播间信息，包括主播、直播流地址和当前竞拍 ID。
 - `GET /api/auction`：获取竞拍快照。
 - `GET /api/auction/history`：获取最近竞拍历史，用于观众“我的竞拍”和演示复盘。
 - `GET /api/orders`：获取内存中的订单列表，用于主播端订单管理。

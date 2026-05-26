@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { completeWithModel } from "./ai.js";
-import type { Auction, AuctionHistoryItem, AuctionSnapshot, Bid, Order, Product } from "./types.js";
+import type { Auction, AuctionHistoryItem, AuctionSnapshot, Bid, LiveRoom, Order, Product } from "./types.js";
 
 const DATA_FILE = resolve(process.env.AUCTION_DATA_FILE ?? "data/auction-state.json");
 
@@ -12,6 +12,15 @@ const product: Product = {
   imageUrl:
     "https://images.unsplash.com/photo-1605100804763-247f67b3557e?auto=format&fit=crop&w=900&q=80",
   description: "模拟直播间竞拍商品，适合用于演示实时出价、自动延时和封顶成交流程。"
+};
+
+const liveRoom: LiveRoom = {
+  id: "live-1",
+  title: "珠宝严选竞拍直播间",
+  hostName: "主播小雅",
+  streamUrl: "https://example.com/mock/live-room.m3u8",
+  viewerCount: 1286,
+  currentAuctionId: "auction-1"
 };
 
 const auction: Auction = {
@@ -61,6 +70,13 @@ export function getSnapshot(): AuctionSnapshot {
     order,
     participantCount: participantIds.size,
     serverTime: Date.now()
+  };
+}
+
+export function getLiveRoom() {
+  return {
+    ...liveRoom,
+    viewerCount: liveRoom.viewerCount + participantIds.size
   };
 }
 

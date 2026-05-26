@@ -11,6 +11,7 @@ import {
   generateProductScript,
   getAuction,
   getSnapshot,
+  getLiveRoom,
   getOrders,
   payOrder,
   placeBid,
@@ -40,6 +41,13 @@ app.get("/api/health", (_req, res) => {
 
 app.get("/api/auction", (_req, res) => {
   res.json(getSnapshot());
+});
+
+app.get("/api/live-rooms/default", (_req, res) => {
+  res.json({
+    ok: true,
+    room: getLiveRoom()
+  });
 });
 
 app.get("/api/auction/history", (_req, res) => {

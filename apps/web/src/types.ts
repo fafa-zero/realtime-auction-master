@@ -7,6 +7,15 @@ export interface Product {
   description: string;
 }
 
+export interface LiveRoom {
+  id: string;
+  title: string;
+  hostName: string;
+  streamUrl: string;
+  viewerCount: number;
+  currentAuctionId: string;
+}
+
 export interface Bid {
   id: string;
   auctionId: string;

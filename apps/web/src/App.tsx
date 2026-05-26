@@ -22,7 +22,7 @@ import {
   WifiOff
 } from "lucide-react";
 import { io, type Socket } from "socket.io-client";
-import type { AuctionHistoryItem, AuctionSnapshot, AuctionStatus, Order } from "./types";
+import type { AuctionHistoryItem, AuctionSnapshot, AuctionStatus, LiveRoom, Order } from "./types";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 
@@ -70,6 +70,7 @@ const demoBidders = [
 
 export function App() {
   const [snapshot, setSnapshot] = useState<AuctionSnapshot | null>(null);
+  const [liveRoom, setLiveRoom] = useState<LiveRoom | null>(null);
   const [connected, setConnected] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("host");
   const [userId] = useState(() => `user-${Math.floor(Math.random() * 9000 + 1000)}`);
@@ -87,6 +88,11 @@ export function App() {
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
+    fetch(`${API_URL}/api/live-rooms/default`)
+      .then((res) => res.json())
+      .then((data: { room: LiveRoom }) => setLiveRoom(data.room))
+      .catch(() => setMessage("无法获取直播间信息，请确认后端已启动"));
+
     fetch(`${API_URL}/api/auction`)
       .then((res) => res.json())
       .then((data: AuctionSnapshot) => {
@@ -474,14 +480,15 @@ export function App() {
           </div>
           <img src={snapshot.product.imageUrl} alt={snapshot.product.name} />
           <div className="live-overlay">
-            <p>抖音电商直播模拟</p>
+            <p>{liveRoom ? `${liveRoom.hostName} / ${liveRoom.id}` : "抖音电商直播模拟"}</p>
             <strong>{snapshot.product.name}</strong>
             <div className="live-meta">
               <span>
                 <TrendingUp size={15} />
                 当前价 {formatMoney(snapshot.auction.currentPrice)}
               </span>
-              <span>{snapshot.participantCount} 人围观出价</span>
+              <span>{liveRoom?.viewerCount ?? snapshot.participantCount} 人正在观看</span>
+              <span>{liveRoom?.title ?? "模拟直播间"}</span>
             </div>
           </div>
         </div>
