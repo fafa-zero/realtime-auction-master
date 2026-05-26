@@ -57,3 +57,12 @@ export interface AuctionSnapshot {
   participantCount: number;
   serverTime: number;
 }
+
+export interface AuctionHistoryItem {
+  product: Product;
+  auction: Auction;
+  bids: Bid[];
+  order: Order | null;
+  participantCount: number;
+  archivedAt: number;
+}

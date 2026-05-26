@@ -6,10 +6,12 @@ import { z } from "zod";
 import {
   cancelAuction,
   detectBidRisk,
+  getAuctionHistory,
   generateAuctionSummary,
   generateProductScript,
   getAuction,
   getSnapshot,
+  getOrders,
   payOrder,
   placeBid,
   settleAuction,
@@ -38,6 +40,20 @@ app.get("/api/health", (_req, res) => {
 
 app.get("/api/auction", (_req, res) => {
   res.json(getSnapshot());
+});
+
+app.get("/api/auction/history", (_req, res) => {
+  res.json({
+    ok: true,
+    items: getAuctionHistory()
+  });
+});
+
+app.get("/api/orders", (_req, res) => {
+  res.json({
+    ok: true,
+    items: getOrders()
+  });
 });
 
 app.post("/api/auction/start", (req, res) => {

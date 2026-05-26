@@ -108,6 +108,8 @@ AI_MODEL=your_model_name
 
 - `GET /api/health`：健康检查。
 - `GET /api/auction`：获取竞拍快照。
+- `GET /api/auction/history`：获取最近竞拍历史，用于观众“我的竞拍”和演示复盘。
+- `GET /api/orders`：获取内存中的订单列表，用于主播端订单管理。
 - `POST /api/auction/start`：启动或重开竞拍。可传演示参数：
 
 ```json
