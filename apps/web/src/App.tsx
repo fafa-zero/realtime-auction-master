@@ -7,6 +7,7 @@ import {
   CircleDollarSign,
   Clock3,
   CreditCard,
+  Flame,
   FileText,
   Radio,
   RotateCcw,
@@ -57,6 +58,12 @@ const aiTaskText: Record<AiTask, string> = {
   summary: "竞拍复盘",
   risk: "风险提示"
 };
+
+const demoBidders = [
+  { userId: "demo-user-a", nickname: "演示用户A", stepMultiplier: 1 },
+  { userId: "demo-user-b", nickname: "演示用户B", stepMultiplier: 2 },
+  { userId: "demo-user-c", nickname: "演示用户C", stepMultiplier: 3 }
+];
 
 export function App() {
   const [snapshot, setSnapshot] = useState<AuctionSnapshot | null>(null);
@@ -245,22 +252,74 @@ export function App() {
     }
 
     setSubmittingBid(true);
+    emitBid({
+      userId,
+      nickname: cleanNickname,
+      price,
+      onDone: () => {
+        setSubmittingBid(false);
+      }
+    });
+  }
+
+  function placeDemoBid(bidder: (typeof demoBidders)[number]) {
+    if (!snapshot) {
+      return;
+    }
+
+    const price = Math.min(
+      snapshot.auction.ceilingPrice,
+      snapshot.auction.currentPrice + snapshot.auction.incrementStep * bidder.stepMultiplier
+    );
+
+    emitBid({
+      userId: bidder.userId,
+      nickname: bidder.nickname,
+      price
+    });
+  }
+
+  function placeCeilingBid() {
+    if (!snapshot) {
+      return;
+    }
+
+    emitBid({
+      userId: "demo-user-final",
+      nickname: "封顶买家",
+      price: snapshot.auction.ceilingPrice
+    });
+  }
+
+  function emitBid(input: {
+    userId: string;
+    nickname: string;
+    price: number;
+    onDone?: () => void;
+  }) {
+    if (!socketRef.current) {
+      setMessage("实时连接未就绪，无法出价");
+      input.onDone?.();
+      return;
+    }
+
     socketRef.current.emit(
       "auction:bid",
       {
-        userId,
-        nickname: cleanNickname,
-        price,
-        clientRequestId: `${userId}-${Date.now()}-${Math.random().toString(16).slice(2)}`
+        userId: input.userId,
+        nickname: input.nickname,
+        price: input.price,
+        clientRequestId: `${input.userId}-${Date.now()}-${Math.random().toString(16).slice(2)}`
       },
       (response: { ok: boolean; message?: string }) => {
-        setSubmittingBid(false);
+        input.onDone?.();
+
         if (!response.ok) {
           setMessage(response.message ?? "出价失败");
           return;
         }
 
-        setMessage("出价成功，等待广播同步");
+        setMessage(`${input.nickname} 出价 ${formatMoney(input.price)}，等待广播同步`);
       }
     );
   }
@@ -465,6 +524,34 @@ export function App() {
             onClick={placeUserBid}
           >
             {submittingBid ? "出价提交中" : `出价 ${formatMoney(Number(bidPrice || nextBid))}`}
+          </button>
+        </section>
+
+        <section className="panel-section demo-panel">
+          <div className="section-title">
+            <Flame size={18} />
+            <h2>演示出价工具</h2>
+          </div>
+          <div className="demo-bid-grid">
+            {demoBidders.map((bidder) => (
+              <button
+                disabled={snapshot.auction.status !== "ACTIVE" || !connected}
+                key={bidder.userId}
+                onClick={() => placeDemoBid(bidder)}
+              >
+                <span>{bidder.nickname}</span>
+                <strong>
+                  +{formatMoney(snapshot.auction.incrementStep * bidder.stepMultiplier)}
+                </strong>
+              </button>
+            ))}
+          </div>
+          <button
+            className="ceiling-button"
+            disabled={snapshot.auction.status !== "ACTIVE" || !connected}
+            onClick={placeCeilingBid}
+          >
+            封顶出价 {formatMoney(snapshot.auction.ceilingPrice)}
           </button>
         </section>
 
