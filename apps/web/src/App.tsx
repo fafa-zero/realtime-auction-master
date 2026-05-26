@@ -25,6 +25,7 @@ import { io, type Socket } from "socket.io-client";
 import type { AuctionHistoryItem, AuctionSnapshot, AuctionStatus, LiveRoom, Order } from "./types";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "";
+const DEFAULT_LIVE_ROOM_ID = "live-1";
 
 const statusText = {
   PENDING: "待开始",
@@ -55,6 +56,12 @@ type PayOrderResponse =
 
 type AiTask = "script" | "summary" | "risk";
 type ViewMode = "host" | "buyer";
+type AppRoute = {
+  viewMode: ViewMode;
+  liveRoomId: string;
+  notFound?: boolean;
+  redirectTo?: string;
+};
 
 const aiTaskText: Record<AiTask, string> = {
   script: "讲解词",
@@ -69,14 +76,19 @@ const demoBidders = [
 ];
 
 export function App() {
+  const [route, setRoute] = useState<AppRoute>(() => parseRoute(getCurrentPath()));
   const [snapshot, setSnapshot] = useState<AuctionSnapshot | null>(null);
   const [liveRoom, setLiveRoom] = useState<LiveRoom | null>(null);
+  const [liveRooms, setLiveRooms] = useState<LiveRoom[]>([]);
   const [connected, setConnected] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>("host");
   const [userId] = useState(() => `user-${Math.floor(Math.random() * 9000 + 1000)}`);
   const [nickname, setNickname] = useState(() => `用户${Math.floor(Math.random() * 90 + 10)}`);
   const [bidPrice, setBidPrice] = useState("");
+  const [durationSeconds, setDurationSeconds] = useState("90");
+  const [incrementStep, setIncrementStep] = useState("100");
+  const [ceilingPrice, setCeilingPrice] = useState("3000");
   const [message, setMessage] = useState("正在连接竞拍服务...");
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const [serverOffset, setServerOffset] = useState(0);
   const [submittingBid, setSubmittingBid] = useState(false);
@@ -86,22 +98,76 @@ export function App() {
   const [historyItems, setHistoryItems] = useState<AuctionHistoryItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const socketRef = useRef<Socket | null>(null);
+  const viewMode = route.viewMode;
+  const liveRoomId = route.liveRoomId;
 
   useEffect(() => {
-    fetch(`${API_URL}/api/live-rooms/default`)
-      .then((res) => res.json())
-      .then((data: { room: LiveRoom }) => setLiveRoom(data.room))
-      .catch(() => setMessage("无法获取直播间信息，请确认后端已启动"));
+    const onPopState = () => setRoute(parseRoute(getCurrentPath()));
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
-    fetch(`${API_URL}/api/auction`)
-      .then((res) => res.json())
-      .then((data: AuctionSnapshot) => {
-        syncSnapshotClock(data);
-        setSnapshot(data);
-        setBidPrice(String(data.auction.currentPrice + data.auction.incrementStep));
+  useEffect(() => {
+    if (!route.redirectTo) {
+      return;
+    }
+
+    window.history.replaceState(null, "", route.redirectTo);
+    setRoute(parseRoute(route.redirectTo));
+  }, [route.redirectTo]);
+
+  useEffect(() => {
+    if (route.notFound) {
+      return;
+    }
+
+    let cancelled = false;
+    setSnapshot(null);
+    setLiveRoom(null);
+    setLoadError(null);
+    setConnected(false);
+    setMessage(`正在进入直播间 ${liveRoomId}...`);
+
+    async function loadInitialData() {
+      try {
+        const [roomRes, auctionRes] = await Promise.all([
+          fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}`),
+          fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/auction`)
+        ]);
+        const roomData = (await roomRes.json()) as { room?: LiveRoom; message?: string };
+        const auctionData = (await auctionRes.json()) as AuctionSnapshot & { message?: string };
+
+        if (!roomRes.ok) {
+          throw new Error(roomData.message ?? "直播间不存在");
+        }
+
+        if (!auctionRes.ok) {
+          throw new Error(auctionData.message ?? "无法获取竞拍数据");
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        setLiveRoom(roomData.room ?? null);
+        syncSnapshotClock(auctionData);
+        setSnapshot(auctionData);
+        setBidPrice(String(auctionData.auction.currentPrice + auctionData.auction.incrementStep));
+        setDurationSeconds(String(auctionData.auction.durationSeconds));
+        setIncrementStep(String(auctionData.auction.incrementStep));
+        setCeilingPrice(String(auctionData.auction.ceilingPrice));
         void refreshArchiveData();
-      })
-      .catch(() => setMessage("无法获取竞拍数据，请确认后端已启动"));
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        setLoadError(error instanceof Error ? error.message : "无法进入直播间，请确认后端已启动");
+        setMessage("无法进入直播间");
+      }
+    }
+
+    void loadInitialData();
 
     const socket = io(API_URL, {
       transports: ["websocket", "polling"],
@@ -113,7 +179,7 @@ export function App() {
     socket.on("connect", () => {
       setConnected(true);
       setMessage("已连接实时竞拍服务");
-      socket.emit("auction:join");
+      socket.emit("auction:join", { liveRoomId });
     });
 
     socket.on("disconnect", () => {
@@ -122,6 +188,10 @@ export function App() {
     });
 
     const updateSnapshot = (data: AuctionSnapshot) => {
+      if (data.auction.liveRoomId !== liveRoomId) {
+        return false;
+      }
+
       syncSnapshotClock(data);
       setSnapshot((current) => {
         if (current && data.auction.version < current.auction.version) {
@@ -129,36 +199,49 @@ export function App() {
         }
 
         setBidPrice(String(data.auction.currentPrice + data.auction.incrementStep));
+        setDurationSeconds(String(data.auction.durationSeconds));
+        setIncrementStep(String(data.auction.incrementStep));
+        setCeilingPrice(String(data.auction.ceilingPrice));
         return data;
       });
+      return true;
     };
 
     socket.on("auction:snapshot", updateSnapshot);
     socket.on("auction:started", (data: AuctionSnapshot) => {
-      updateSnapshot(data);
-      setMessage("竞拍已开始");
+      if (updateSnapshot(data)) {
+        setMessage("竞拍已开始");
+      }
     });
     socket.on("auction:bid-success", (data: AuctionSnapshot) => {
-      updateSnapshot(data);
-      setMessage(`当前最高价已更新为 ${formatMoney(data.auction.currentPrice)}`);
+      if (updateSnapshot(data)) {
+        setMessage(`当前最高价已更新为 ${formatMoney(data.auction.currentPrice)}`);
+      }
     });
     socket.on("auction:extended", (data: AuctionSnapshot) => {
-      updateSnapshot(data);
-      setMessage(`触发自动延时，结束时间延长 ${data.auction.extendSeconds} 秒`);
+      if (updateSnapshot(data)) {
+        setMessage(`触发自动延时，结束时间延长 ${data.auction.extendSeconds} 秒`);
+      }
     });
     socket.on("auction:ended", (data: AuctionSnapshot) => {
-      updateSnapshot(data);
-      setMessage(data.auction.status === "SOLD" ? "竞拍已成交" : "竞拍已结束");
-      void refreshArchiveData();
+      if (updateSnapshot(data)) {
+        setMessage(data.auction.status === "SOLD" ? "竞拍已成交" : "竞拍已结束");
+        void refreshArchiveData();
+      }
     });
     socket.on("auction:cancelled", (result: { reason: string; snapshot: AuctionSnapshot }) => {
-      updateSnapshot(result.snapshot);
-      setMessage(`竞拍已取消：${result.reason}`);
-      void refreshArchiveData();
+      if (updateSnapshot(result.snapshot)) {
+        setMessage(`竞拍已取消：${result.reason}`);
+        void refreshArchiveData();
+      }
     });
     socket.on("order:paid", (data: AuctionSnapshot) => {
-      updateSnapshot(data);
-      void refreshArchiveData();
+      if (updateSnapshot(data)) {
+        void refreshArchiveData();
+      }
+    });
+    socket.on("auction:error", (data: { message?: string }) => {
+      setMessage(data.message ?? "实时消息订阅失败");
     });
 
     function syncSnapshotClock(data: AuctionSnapshot) {
@@ -166,8 +249,18 @@ export function App() {
     }
 
     return () => {
+      cancelled = true;
       socket.disconnect();
     };
+  }, [liveRoomId, route.notFound]);
+
+  useEffect(() => {
+    fetch(`${API_URL}/api/live-rooms`)
+      .then((res) => res.json())
+      .then((data: { items?: LiveRoom[] }) => setLiveRooms(data.items ?? []))
+      .catch(() => {
+        // The page can still operate with the current room snapshot.
+      });
   }, []);
 
   useEffect(() => {
@@ -222,7 +315,34 @@ export function App() {
   );
 
   async function startAuction() {
-    const res = await fetch(`${API_URL}/api/auction/start`, { method: "POST" });
+    const duration = Number(durationSeconds);
+    const step = Number(incrementStep);
+    const ceiling = Number(ceilingPrice);
+
+    if (!Number.isInteger(duration) || duration < 15 || duration > 600) {
+      setMessage("竞拍时长必须是 15 到 600 秒的整数");
+      return;
+    }
+
+    if (!Number.isInteger(step) || step < 1) {
+      setMessage("最低加价必须是大于 0 的整数");
+      return;
+    }
+
+    if (!Number.isInteger(ceiling) || ceiling < step) {
+      setMessage("封顶价必须是整数，并且不能低于首次最低出价");
+      return;
+    }
+
+    const res = await fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/auction/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        durationSeconds: duration,
+        incrementStep: step,
+        ceilingPrice: ceiling
+      })
+    });
     const data = await res.json();
 
     if (!res.ok) {
@@ -236,7 +356,7 @@ export function App() {
   }
 
   async function cancelAuction() {
-    const res = await fetch(`${API_URL}/api/auction/cancel`, {
+    const res = await fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/auction/cancel`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ reason: "主播手动取消异常竞拍" })
@@ -330,6 +450,7 @@ export function App() {
       "auction:bid",
       {
         userId: input.userId,
+        liveRoomId,
         nickname: input.nickname,
         price: input.price,
         clientRequestId: `${input.userId}-${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -418,8 +539,8 @@ export function App() {
   async function refreshArchiveData() {
     try {
       const [historyRes, ordersRes] = await Promise.all([
-        fetch(`${API_URL}/api/auction/history`),
-        fetch(`${API_URL}/api/orders`)
+        fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/auction/history`),
+        fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/orders`)
       ]);
       const historyData = (await historyRes.json()) as { items?: AuctionHistoryItem[] };
       const ordersData = (await ordersRes.json()) as { items?: Order[] };
@@ -429,6 +550,17 @@ export function App() {
     } catch {
       // Archive panels are secondary; keep the live auction usable if history fetch fails.
     }
+  }
+
+  if (route.notFound || loadError) {
+    return (
+      <RouteError
+        title={route.notFound ? "页面不存在" : "无法进入直播间"}
+        message={loadError ?? "请检查访问路径，主播端使用 /host，观众预览页使用 /live/live-1。"}
+        onGoHost={() => navigateTo("/host", setRoute)}
+        onGoLive={() => navigateTo(`/live/${DEFAULT_LIVE_ROOM_ID}`, setRoute)}
+      />
+    );
   }
 
   if (!snapshot) {
@@ -446,24 +578,39 @@ export function App() {
         <div className="topbar">
           <div>
             <p className="eyebrow">实时竞拍大师</p>
-            <h1>{viewMode === "host" ? "直播间竞拍控制台" : "观众实时竞拍台"}</h1>
-            <p className="topbar-meta">{syncLabel} / Socket.IO 多端广播</p>
-          </div>
+              <h1>{viewMode === "host" ? "直播间竞拍控制台" : "观众实时竞拍台"}</h1>
+              <p className="topbar-meta">{syncLabel} / Socket.IO 多端广播</p>
+            </div>
           <div className="topbar-actions">
+            {viewMode === "host" ? (
+              <label className="room-select">
+                <span>直播间</span>
+                <select
+                  value={liveRoomId}
+                  onChange={(event) => navigateTo(`/host?liveRoomId=${encodeURIComponent(event.target.value)}`, setRoute)}
+                >
+                  {(liveRooms.length > 0 ? liveRooms : liveRoom ? [liveRoom] : []).map((room) => (
+                    <option value={room.id} key={room.id}>
+                      {room.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <div className="mode-switch" aria-label="视图切换">
               <button
                 className={viewMode === "host" ? "active" : ""}
-                onClick={() => setViewMode("host")}
+                onClick={() => navigateTo(`/host?liveRoomId=${encodeURIComponent(liveRoomId)}`, setRoute)}
               >
                 <Radio size={16} />
                 主播端
               </button>
               <button
                 className={viewMode === "buyer" ? "active" : ""}
-                onClick={() => setViewMode("buyer")}
+                onClick={() => navigateTo(`/live/${liveRoomId}`, setRoute)}
               >
                 <Users size={16} />
-                观众端
+                Web 预览
               </button>
             </div>
             <div className={connected ? "connection online" : "connection offline"}>
@@ -692,6 +839,36 @@ export function App() {
                 <RotateCcw size={18} />
                 <h2>主播操作</h2>
               </div>
+              <div className="settings-grid">
+                <label className="field">
+                  <span>竞拍时长（秒）</span>
+                  <input
+                    type="number"
+                    min={15}
+                    max={600}
+                    value={durationSeconds}
+                    onChange={(event) => setDurationSeconds(event.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  <span>最低加价</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={incrementStep}
+                    onChange={(event) => setIncrementStep(event.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  <span>封顶价</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={ceilingPrice}
+                    onChange={(event) => setCeilingPrice(event.target.value)}
+                  />
+                </label>
+              </div>
               <div className="button-row">
                 <button onClick={startAuction}>开始/重开竞拍</button>
                 <button
@@ -824,6 +1001,76 @@ function ArchiveList(props: {
       ))}
     </div>
   );
+}
+
+function RouteError(props: {
+  title: string;
+  message: string;
+  onGoHost: () => void;
+  onGoLive: () => void;
+}) {
+  return (
+    <main className="route-error">
+      <div>
+        <Radio size={28} />
+        <p className="eyebrow">实时竞拍大师</p>
+        <h1>{props.title}</h1>
+        <p>{props.message}</p>
+        <div className="route-error-actions">
+          <button onClick={props.onGoHost}>进入主播端</button>
+          <button className="primary-button" onClick={props.onGoLive}>
+            打开观众预览
+          </button>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+function parseRoute(pathname: string): AppRoute {
+  const url = new URL(pathname, window.location.origin);
+  const cleanPath = url.pathname.replace(/\/+$/, "") || "/";
+  const queryLiveRoomId = url.searchParams.get("liveRoomId") ?? undefined;
+
+  if (cleanPath === "/") {
+    return {
+      viewMode: "buyer",
+      liveRoomId: DEFAULT_LIVE_ROOM_ID,
+      redirectTo: `/live/${DEFAULT_LIVE_ROOM_ID}`
+    };
+  }
+
+  if (cleanPath === "/host") {
+    return {
+      viewMode: "host",
+      liveRoomId: queryLiveRoomId || DEFAULT_LIVE_ROOM_ID
+    };
+  }
+
+  if (cleanPath.startsWith("/live/")) {
+    const [, , rawLiveRoomId] = cleanPath.split("/");
+    const liveRoomId = rawLiveRoomId ? decodeURIComponent(rawLiveRoomId) : DEFAULT_LIVE_ROOM_ID;
+
+    return {
+      viewMode: "buyer",
+      liveRoomId
+    };
+  }
+
+  return {
+    viewMode: "buyer",
+    liveRoomId: DEFAULT_LIVE_ROOM_ID,
+    notFound: true
+  };
+}
+
+function navigateTo(path: string, setRoute: (route: AppRoute) => void) {
+  window.history.pushState(null, "", path);
+  setRoute(parseRoute(path));
+}
+
+function getCurrentPath() {
+  return `${window.location.pathname}${window.location.search}`;
 }
 
 function Metric(props: { label: string; value: string }) {
