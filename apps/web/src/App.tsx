@@ -24,7 +24,7 @@ import {
 import { io, type Socket } from "socket.io-client";
 import type { AuctionHistoryItem, AuctionSnapshot, AuctionStatus, LiveRoom, Order } from "./types";
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
+const API_URL = import.meta.env.VITE_API_URL ?? "";
 
 const statusText = {
   PENDING: "待开始",
