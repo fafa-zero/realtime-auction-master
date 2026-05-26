@@ -85,6 +85,40 @@ app.post("/api/auction/cancel", (req, res) => {
   }
 });
 
+app.post("/api/auction/bids", (req, res) => {
+  try {
+    const schema = z.object({
+      userId: z.string().min(1, "用户 ID 不能为空"),
+      nickname: z.string().min(1, "昵称不能为空"),
+      price: z.number({ invalid_type_error: "出价金额必须是数字" }).positive("出价金额必须大于 0"),
+      clientRequestId: z.string().min(1, "请求 ID 不能为空")
+    });
+    const input = schema.parse(req.body);
+    const result = placeBid(input);
+
+    io.to(ROOM_ID).emit("auction:bid-success", result.snapshot);
+
+    if (result.extended) {
+      io.to(ROOM_ID).emit("auction:extended", result.snapshot);
+    }
+
+    if (result.settled) {
+      io.to(ROOM_ID).emit("auction:ended", result.snapshot);
+    }
+
+    res.json({
+      ok: true,
+      bid: result.bid,
+      extended: result.extended,
+      settled: result.settled,
+      duplicate: result.duplicate,
+      snapshot: result.snapshot
+    });
+  } catch (error) {
+    res.status(400).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
 app.post("/api/orders/:orderId/pay", (req, res) => {
   try {
     const paidOrder = payOrder(req.params.orderId);
