@@ -9,6 +9,7 @@ import {
   CreditCard,
   Flame,
   FileText,
+  History,
   Radio,
   RotateCcw,
   ShieldAlert,
@@ -21,7 +22,7 @@ import {
   WifiOff
 } from "lucide-react";
 import { io, type Socket } from "socket.io-client";
-import type { AuctionSnapshot, AuctionStatus, Order } from "./types";
+import type { AuctionHistoryItem, AuctionSnapshot, AuctionStatus, Order } from "./types";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 
@@ -81,6 +82,8 @@ export function App() {
   const [aiResult, setAiResult] = useState<AiResult | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiTask, setAiTask] = useState<AiTask | null>(null);
+  const [historyItems, setHistoryItems] = useState<AuctionHistoryItem[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
@@ -90,6 +93,7 @@ export function App() {
         syncSnapshotClock(data);
         setSnapshot(data);
         setBidPrice(String(data.auction.currentPrice + data.auction.incrementStep));
+        void refreshArchiveData();
       })
       .catch(() => setMessage("无法获取竞拍数据，请确认后端已启动"));
 
@@ -139,12 +143,17 @@ export function App() {
     socket.on("auction:ended", (data: AuctionSnapshot) => {
       updateSnapshot(data);
       setMessage(data.auction.status === "SOLD" ? "竞拍已成交" : "竞拍已结束");
+      void refreshArchiveData();
     });
     socket.on("auction:cancelled", (result: { reason: string; snapshot: AuctionSnapshot }) => {
       updateSnapshot(result.snapshot);
       setMessage(`竞拍已取消：${result.reason}`);
+      void refreshArchiveData();
     });
-    socket.on("order:paid", updateSnapshot);
+    socket.on("order:paid", (data: AuctionSnapshot) => {
+      updateSnapshot(data);
+      void refreshArchiveData();
+    });
 
     function syncSnapshotClock(data: AuctionSnapshot) {
       setServerOffset(data.serverTime - Date.now());
@@ -202,6 +211,9 @@ export function App() {
   const stageLabel = snapshot ? getStageLabel(snapshot.auction.status) : "";
   const stageDetail = snapshot ? getStageDetail(snapshot, remaining) : "";
   const syncLabel = connected && snapshot ? `同步版本 v${snapshot.auction.version}` : "等待实时同步";
+  const myHistory = historyItems.filter((item) =>
+    item.bids.some((bid) => bid.userId === userId || bid.nickname === nickname)
+  );
 
   async function startAuction() {
     const res = await fetch(`${API_URL}/api/auction/start`, { method: "POST" });
@@ -214,6 +226,7 @@ export function App() {
 
     setSnapshot(data);
     setMessage("竞拍已启动");
+    void refreshArchiveData();
   }
 
   async function cancelAuction() {
@@ -230,6 +243,7 @@ export function App() {
     }
 
     setSnapshot(data);
+    void refreshArchiveData();
   }
 
   function placeUserBid() {
@@ -392,6 +406,23 @@ export function App() {
     }
 
     setMessage("模拟支付成功");
+    void refreshArchiveData();
+  }
+
+  async function refreshArchiveData() {
+    try {
+      const [historyRes, ordersRes] = await Promise.all([
+        fetch(`${API_URL}/api/auction/history`),
+        fetch(`${API_URL}/api/orders`)
+      ]);
+      const historyData = (await historyRes.json()) as { items?: AuctionHistoryItem[] };
+      const ordersData = (await ordersRes.json()) as { items?: Order[] };
+
+      setHistoryItems(historyData.items ?? []);
+      setOrders(ordersData.items ?? []);
+    } catch {
+      // Archive panels are secondary; keep the live auction usable if history fetch fails.
+    }
   }
 
   if (!snapshot) {
@@ -665,6 +696,24 @@ export function App() {
                 </button>
               </div>
             </section>
+
+            <section className="panel-section">
+              <div className="section-title">
+                <History size={18} />
+                <h2>订单管理</h2>
+              </div>
+              <ArchiveList
+                emptyText="暂无历史订单"
+                items={orders.slice(0, 5).map((item) => ({
+                  id: item.id,
+                  title: item.buyerNickname,
+                  meta: `${formatMoney(item.finalPrice)} / ${
+                    item.status === "PAID" ? "已支付" : "待支付"
+                  }`,
+                  time: item.createdAt
+                }))}
+              />
+            </section>
           </>
         ) : null}
 
@@ -719,8 +768,54 @@ export function App() {
             )}
           </div>
         </section>
+
+        {viewMode === "buyer" ? (
+          <section className="panel-section">
+            <div className="section-title">
+              <History size={18} />
+              <h2>我的竞拍</h2>
+            </div>
+            <ArchiveList
+              emptyText="暂无参与记录"
+              items={myHistory.slice(0, 5).map((item) => ({
+                id: `${item.auction.startTime ?? item.archivedAt}`,
+                title: item.product.name,
+                meta: `${statusText[item.auction.status]} / 最高价 ${formatMoney(item.auction.currentPrice)}`,
+                time: item.archivedAt
+              }))}
+            />
+          </section>
+        ) : null}
       </aside>
     </main>
+  );
+}
+
+function ArchiveList(props: {
+  emptyText: string;
+  items: Array<{
+    id: string;
+    title: string;
+    meta: string;
+    time: number;
+  }>;
+}) {
+  if (props.items.length === 0) {
+    return <p className="muted">{props.emptyText}</p>;
+  }
+
+  return (
+    <div className="archive-list">
+      {props.items.map((item) => (
+        <div className="archive-row" key={item.id}>
+          <div>
+            <strong>{item.title}</strong>
+            <span>{item.meta}</span>
+          </div>
+          <small>{formatTime(item.time)}</small>
+        </div>
+      ))}
+    </div>
   );
 }
 

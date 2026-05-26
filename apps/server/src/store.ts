@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { completeWithModel } from "./ai.js";
-import type { Auction, AuctionSnapshot, Bid, Order, Product } from "./types.js";
+import type { Auction, AuctionHistoryItem, AuctionSnapshot, Bid, Order, Product } from "./types.js";
 
 const product: Product = {
   id: "product-1",
@@ -34,6 +34,7 @@ const auction: Auction = {
 const bids: Bid[] = [];
 const participantIds = new Set<string>();
 const processedBidRequestIds = new Map<string, Bid>();
+const history: AuctionHistoryItem[] = [];
 let order: Order | null = null;
 
 export interface StartAuctionOptions {
@@ -57,10 +58,28 @@ export function getSnapshot(): AuctionSnapshot {
   };
 }
 
+export function getAuctionHistory() {
+  return history.slice(0, 20);
+}
+
+export function getOrders() {
+  const orderMap = new Map<string, Order>();
+
+  for (const item of [order, ...history.map((historyItem) => historyItem.order)]) {
+    if (item) {
+      orderMap.set(item.id, item);
+    }
+  }
+
+  return [...orderMap.values()];
+}
+
 export function startAuction(options: StartAuctionOptions = {}) {
   if (auction.status !== "PENDING" && auction.status !== "UNSOLD" && auction.status !== "SOLD") {
     throw new Error("当前竞拍状态不允许开始");
   }
+
+  archiveCurrentAuction();
 
   const now = Date.now();
   bids.length = 0;
@@ -103,6 +122,7 @@ export function cancelAuction(reason = "主播取消竞拍") {
 
   auction.status = "CANCELLED";
   auction.version += 1;
+  archiveCurrentAuction();
 
   return {
     reason,
@@ -219,6 +239,8 @@ export function settleAuction() {
     auction.status = "UNSOLD";
   }
 
+  archiveCurrentAuction();
+
   return {
     settled: true,
     snapshot: getSnapshot()
@@ -239,8 +261,33 @@ export function payOrder(orderId: string) {
     status: "PAID"
   };
   auction.version += 1;
+  archiveCurrentAuction();
 
   return order;
+}
+
+function archiveCurrentAuction() {
+  if (auction.status === "PENDING") {
+    return;
+  }
+
+  const historyItem = {
+    product: { ...product },
+    auction: { ...auction },
+    bids: [...bids].sort((a, b) => b.createdAt - a.createdAt),
+    order: order ? { ...order } : null,
+    participantCount: participantIds.size,
+    archivedAt: Date.now()
+  };
+  const existingIndex = history.findIndex((item) => item.auction.startTime === auction.startTime);
+
+  if (existingIndex >= 0) {
+    history[existingIndex] = historyItem;
+  } else {
+    history.unshift(historyItem);
+  }
+
+  history.splice(20);
 }
 
 export async function generateProductScript() {
