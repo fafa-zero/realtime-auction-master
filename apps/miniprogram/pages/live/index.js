@@ -27,6 +27,7 @@ Page({
     statusText: "待开始",
     bidButtonText: "出价",
     hint: "竞拍开始后可出价",
+    realtimeText: "实时连接准备中",
     canBid: false
   },
 
@@ -37,17 +38,17 @@ Page({
   },
 
   onShow() {
-    this.pollTimer = setInterval(() => this.loadSnapshot(), 2000);
+    this.connectRealtime();
     this.clockTimer = setInterval(() => this.refreshComputed(), 500);
   },
 
   onHide() {
-    clearInterval(this.pollTimer);
+    this.closeRealtime();
     clearInterval(this.clockTimer);
   },
 
   onUnload() {
-    clearInterval(this.pollTimer);
+    this.closeRealtime();
     clearInterval(this.clockTimer);
   },
 
@@ -79,6 +80,89 @@ Page({
       this.applySnapshot(snapshot);
     } catch {
       this.setData({ hint: "网络波动，正在恢复直播间数据" });
+    }
+  },
+
+  connectRealtime() {
+    const app = getApp();
+
+    this.closeRealtime();
+    this.setData({ realtimeText: "实时连接中" });
+
+    this.socket = wx.connectSocket({
+      url: app.globalData.wsUrl,
+      success: () => {}
+    });
+
+    this.socket.onOpen(() => {
+      this.setData({ realtimeText: "实时已连接" });
+      this.socket.send({
+        data: JSON.stringify({
+          type: "auction:join",
+          payload: {
+            liveRoomId: this.data.liveRoomId
+          }
+        })
+      });
+    });
+
+    this.socket.onMessage((event) => {
+      this.handleRealtimeMessage(event.data);
+    });
+
+    this.socket.onClose(() => {
+      this.setData({ realtimeText: "实时已断开，使用轮询兜底" });
+      this.startPollingFallback();
+    });
+
+    this.socket.onError(() => {
+      this.setData({ realtimeText: "实时连接失败，使用轮询兜底" });
+      this.startPollingFallback();
+    });
+  },
+
+  closeRealtime() {
+    if (this.socket) {
+      this.socket.close({});
+      this.socket = null;
+    }
+
+    clearInterval(this.pollTimer);
+  },
+
+  startPollingFallback() {
+    clearInterval(this.pollTimer);
+    this.pollTimer = setInterval(() => this.loadSnapshot(), 2000);
+  },
+
+  handleRealtimeMessage(raw) {
+    try {
+      const message = JSON.parse(raw);
+
+      if (
+        message.type === "auction:snapshot" ||
+        message.type === "auction:started" ||
+        message.type === "auction:bid-success" ||
+        message.type === "auction:extended" ||
+        message.type === "auction:ended" ||
+        message.type === "order:paid"
+      ) {
+        this.applySnapshot(message.payload);
+        this.setData({ realtimeText: "实时同步中" });
+        return;
+      }
+
+      if (message.type === "auction:cancelled") {
+        this.applySnapshot(message.payload.snapshot);
+        this.setData({ realtimeText: "竞拍已取消" });
+        return;
+      }
+
+      if (message.type === "auction:error") {
+        this.setData({ hint: message.payload.message || "实时消息错误" });
+      }
+    } catch {
+      this.setData({ hint: "实时消息解析失败" });
     }
   },
 
@@ -138,9 +222,27 @@ Page({
     this.setData({ submitting: true, hint: "正在提交出价..." });
 
     try {
+      const clientRequestId = `mp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+      if (this.socket) {
+        this.socket.send({
+          data: JSON.stringify({
+            type: "auction:bid",
+            payload: {
+              liveRoomId: this.data.liveRoomId,
+              token: getApp().globalData.token,
+              price: Number(this.data.bidPrice),
+              clientRequestId
+            }
+          })
+        });
+        this.setData({ hint: "出价已提交，等待实时同步" });
+        return;
+      }
+
       const result = await placeBid(this.data.liveRoomId, {
         price: Number(this.data.bidPrice),
-        clientRequestId: `mp-${Date.now()}-${Math.random().toString(16).slice(2)}`
+        clientRequestId
       });
 
       this.applySnapshot(result.snapshot);

@@ -4,7 +4,8 @@ App({
   globalData: {
     token: "",
     user: null,
-    apiBaseUrl: "http://localhost:4200"
+    apiBaseUrl: "http://localhost:4200",
+    wsUrl: "ws://localhost:4200/miniprogram-ws"
   },
 
   async ensureLogin() {

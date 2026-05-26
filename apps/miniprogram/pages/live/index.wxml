@@ -9,6 +9,7 @@
         <text class="live-badge">LIVE</text>
         <text class="stage-title">{{room.title}}</text>
         <text class="stage-meta">{{room.hostName}} / {{room.viewerCount}} 人观看</text>
+        <text class="realtime">{{realtimeText}}</text>
       </view>
     </view>
 

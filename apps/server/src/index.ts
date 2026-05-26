@@ -2,6 +2,7 @@ import http from "node:http";
 import cors from "cors";
 import express from "express";
 import { Server } from "socket.io";
+import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import { z } from "zod";
 import {
   cancelAuction,
@@ -40,6 +41,8 @@ const io = new Server(server, {
     methods: ["GET", "POST"]
   }
 });
+const miniprogramWss = new WebSocketServer({ noServer: true });
+const miniprogramClients = new Map<WebSocket, { liveRoomId: string | null }>();
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, serverTime: Date.now() });
@@ -212,7 +215,7 @@ function handleStartAuction(body: unknown, liveRoomId: string, res: express.Resp
     });
     const input = schema.parse(body ?? {});
     const snapshot = startAuction(liveRoomId, input);
-    io.to(getLiveRoomSocketRoom(liveRoomId)).emit("auction:started", snapshot);
+    broadcastAuctionEvent(liveRoomId, "auction:started", snapshot);
     res.json(snapshot);
   } catch (error) {
     res.status(400).json({ message: getErrorMessage(error) });
@@ -235,7 +238,7 @@ function handleCancelAuction(body: unknown, liveRoomId: string, res: express.Res
     });
     const input = schema.parse(body);
     const result = cancelAuction(liveRoomId, input.reason);
-    io.to(getLiveRoomSocketRoom(liveRoomId)).emit("auction:cancelled", result);
+    broadcastAuctionEvent(liveRoomId, "auction:cancelled", result);
     res.json(result.snapshot);
   } catch (error) {
     res.status(400).json({ message: getErrorMessage(error) });
@@ -263,16 +266,15 @@ function handlePlaceBid(body: unknown, liveRoomId: string, res: express.Response
     const input = schema.parse(body);
     const bidder = resolveBidder(input, authUser);
     const result = placeBid({ ...input, ...bidder, liveRoomId });
-    const room = getLiveRoomSocketRoom(liveRoomId);
 
-    io.to(room).emit("auction:bid-success", result.snapshot);
+    broadcastAuctionEvent(liveRoomId, "auction:bid-success", result.snapshot);
 
     if (result.extended) {
-      io.to(room).emit("auction:extended", result.snapshot);
+      broadcastAuctionEvent(liveRoomId, "auction:extended", result.snapshot);
     }
 
     if (result.settled) {
-      io.to(room).emit("auction:ended", result.snapshot);
+      broadcastAuctionEvent(liveRoomId, "auction:ended", result.snapshot);
     }
 
     res.json({
@@ -301,7 +303,7 @@ app.post("/api/orders/:orderId/pay", (req, res) => {
     const paidOrder = payOrder(req.params.orderId);
     const liveRoom = getLiveRooms().find((room) => room.currentAuctionId === paidOrder.auctionId);
     const snapshot = getSnapshot(liveRoom?.id ?? DEFAULT_LIVE_ROOM_ID);
-    io.to(getLiveRoomSocketRoom(snapshot.auction.liveRoomId)).emit("order:paid", snapshot);
+    broadcastAuctionEvent(snapshot.auction.liveRoomId, "order:paid", snapshot);
     res.json({
       ...paidOrder,
       ok: true,
@@ -373,16 +375,15 @@ io.on("connection", (socket) => {
       const authUser = input.token ? getUserByToken(input.token) : null;
       const bidder = resolveBidder(input, authUser);
       const result = placeBid({ ...input, ...bidder });
-      const room = getLiveRoomSocketRoom(result.snapshot.auction.liveRoomId);
 
-      io.to(room).emit("auction:bid-success", result.snapshot);
+      broadcastAuctionEvent(result.snapshot.auction.liveRoomId, "auction:bid-success", result.snapshot);
 
       if (result.extended) {
-        io.to(room).emit("auction:extended", result.snapshot);
+        broadcastAuctionEvent(result.snapshot.auction.liveRoomId, "auction:extended", result.snapshot);
       }
 
       if (result.settled) {
-        io.to(room).emit("auction:ended", result.snapshot);
+        broadcastAuctionEvent(result.snapshot.auction.liveRoomId, "auction:ended", result.snapshot);
       }
 
       callback?.({ ok: true, bid: result.bid });
@@ -404,11 +405,93 @@ setInterval(() => {
       const result = settleAuction(liveRoom.id);
 
       if (result.settled) {
-        io.to(getLiveRoomSocketRoom(liveRoom.id)).emit("auction:ended", result.snapshot);
+        broadcastAuctionEvent(liveRoom.id, "auction:ended", result.snapshot);
       }
     }
   }
 }, 500);
+
+server.on("upgrade", (req, socket, head) => {
+  const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+
+  if (url.pathname !== "/miniprogram-ws") {
+    return;
+  }
+
+  miniprogramWss.handleUpgrade(req, socket, head, (ws) => {
+    miniprogramWss.emit("connection", ws, req);
+  });
+});
+
+miniprogramWss.on("connection", (ws) => {
+  miniprogramClients.set(ws, { liveRoomId: null });
+  sendMiniprogramEvent(ws, "auction:snapshot", getSnapshot(DEFAULT_LIVE_ROOM_ID));
+
+  ws.on("message", (raw) => {
+    try {
+      const message = parseMiniprogramMessage(raw);
+
+      if (message.type === "ping") {
+        sendMiniprogramEvent(ws, "pong", { serverTime: Date.now() });
+        return;
+      }
+
+      if (message.type === "auction:join") {
+        const schema = z.object({
+          liveRoomId: z.string().min(1)
+        });
+        const payload = schema.parse(message.payload ?? {});
+        assertLiveRoom(payload.liveRoomId);
+        miniprogramClients.set(ws, { liveRoomId: payload.liveRoomId });
+        sendMiniprogramEvent(ws, "auction:snapshot", getSnapshot(payload.liveRoomId));
+        return;
+      }
+
+      if (message.type === "auction:bid") {
+        const schema = z.object({
+          liveRoomId: z.string().min(1),
+          token: z.string().min(1),
+          price: z.number().positive(),
+          clientRequestId: z.string().min(1)
+        });
+        const payload = schema.parse(message.payload ?? {});
+        const authUser = getUserByToken(payload.token);
+        const result = placeBid({
+          liveRoomId: payload.liveRoomId,
+          userId: authUser.id,
+          nickname: authUser.nickname,
+          price: payload.price,
+          clientRequestId: payload.clientRequestId
+        });
+
+        broadcastAuctionEvent(payload.liveRoomId, "auction:bid-success", result.snapshot);
+
+        if (result.extended) {
+          broadcastAuctionEvent(payload.liveRoomId, "auction:extended", result.snapshot);
+        }
+
+        if (result.settled) {
+          broadcastAuctionEvent(payload.liveRoomId, "auction:ended", result.snapshot);
+        }
+
+        sendMiniprogramEvent(ws, "auction:bid-ack", {
+          ok: true,
+          bid: result.bid,
+          duplicate: result.duplicate
+        });
+        return;
+      }
+
+      sendMiniprogramEvent(ws, "auction:error", { message: "未知小程序消息类型" });
+    } catch (error) {
+      sendMiniprogramEvent(ws, "auction:error", { message: getErrorMessage(error) });
+    }
+  });
+
+  ws.on("close", () => {
+    miniprogramClients.delete(ws);
+  });
+});
 
 server.listen(PORT, () => {
   console.log(`Auction server is running on http://localhost:${PORT}`);
@@ -441,6 +524,57 @@ function createAiErrorResponse(message: string) {
 
 function getLiveRoomSocketRoom(liveRoomId: string) {
   return `room:live:${liveRoomId}`;
+}
+
+function broadcastAuctionEvent(liveRoomId: string, type: string, payload: unknown) {
+  io.to(getLiveRoomSocketRoom(liveRoomId)).emit(type, payload);
+
+  for (const [ws, client] of miniprogramClients.entries()) {
+    if (client.liveRoomId === liveRoomId) {
+      sendMiniprogramEvent(ws, type, payload);
+    }
+  }
+}
+
+function sendMiniprogramEvent(ws: WebSocket, type: string, payload: unknown) {
+  if (ws.readyState !== ws.OPEN) {
+    return;
+  }
+
+  ws.send(JSON.stringify({ type, payload }));
+}
+
+function parseMiniprogramMessage(raw: RawData) {
+  const text = rawDataToString(raw);
+  const data = JSON.parse(text) as {
+    type?: unknown;
+    payload?: unknown;
+  };
+
+  if (typeof data.type !== "string") {
+    throw new Error("小程序消息 type 不能为空");
+  }
+
+  return {
+    type: data.type,
+    payload: data.payload
+  };
+}
+
+function rawDataToString(raw: RawData) {
+  if (typeof raw === "string") {
+    return raw;
+  }
+
+  if (Array.isArray(raw)) {
+    return Buffer.concat(raw).toString("utf8");
+  }
+
+  if (raw instanceof ArrayBuffer) {
+    return Buffer.from(new Uint8Array(raw)).toString("utf8");
+  }
+
+  return raw.toString("utf8");
 }
 
 function assertLiveRoom(liveRoomId: string) {
