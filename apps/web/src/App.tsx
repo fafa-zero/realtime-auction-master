@@ -2,17 +2,24 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   BadgeCheck,
+  BarChart3,
   Bot,
   CircleDollarSign,
+  Clock3,
+  CreditCard,
+  FileText,
   Radio,
   RotateCcw,
   ShieldAlert,
+  Sparkles,
   Timer,
+  TrendingUp,
+  UserCheck,
   Wifi,
   WifiOff
 } from "lucide-react";
 import { io, type Socket } from "socket.io-client";
-import type { AuctionSnapshot } from "./types";
+import type { AuctionSnapshot, AuctionStatus } from "./types";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 
@@ -32,6 +39,14 @@ type AiResult = {
   level?: string;
 };
 
+type AiTask = "script" | "summary" | "risk";
+
+const aiTaskText: Record<AiTask, string> = {
+  script: "讲解词",
+  summary: "竞拍复盘",
+  risk: "风险提示"
+};
+
 export function App() {
   const [snapshot, setSnapshot] = useState<AuctionSnapshot | null>(null);
   const [connected, setConnected] = useState(false);
@@ -44,6 +59,7 @@ export function App() {
   const [submittingBid, setSubmittingBid] = useState(false);
   const [aiResult, setAiResult] = useState<AiResult | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiTask, setAiTask] = useState<AiTask | null>(null);
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
@@ -132,9 +148,39 @@ export function App() {
   }, [now, serverOffset, snapshot?.auction.endTime]);
 
   const nextBid = snapshot ? snapshot.auction.currentPrice + snapshot.auction.incrementStep : 0;
+  const bidAmount = Number(bidPrice);
   const progress = snapshot
     ? Math.min(100, (snapshot.auction.currentPrice / snapshot.auction.ceilingPrice) * 100)
     : 0;
+  const lastBid = snapshot?.bids[0] ?? null;
+  const canBid = Boolean(
+    snapshot &&
+      connected &&
+      snapshot.auction.status === "ACTIVE" &&
+      !submittingBid &&
+      nickname.trim().length > 0 &&
+      Number.isFinite(bidAmount) &&
+      bidAmount >= nextBid
+  );
+  const bidFeedback = snapshot
+    ? getBidFeedback({
+        status: snapshot.auction.status,
+        connected,
+        nickname,
+        bidAmount,
+        nextBid
+      })
+    : "";
+  const inExtendWindow = Boolean(
+    snapshot &&
+      snapshot.auction.status === "ACTIVE" &&
+      remaining > 0 &&
+      Math.ceil(remaining / 1000) <= snapshot.auction.extendThresholdSeconds &&
+      snapshot.auction.extendCount < snapshot.auction.maxExtendCount
+  );
+  const stageLabel = snapshot ? getStageLabel(snapshot.auction.status) : "";
+  const stageDetail = snapshot ? getStageDetail(snapshot, remaining) : "";
+  const syncLabel = connected && snapshot ? `同步版本 v${snapshot.auction.version}` : "等待实时同步";
 
   async function startAuction() {
     const res = await fetch(`${API_URL}/api/auction/start`, { method: "POST" });
@@ -176,12 +222,23 @@ export function App() {
       return;
     }
 
+    if (price < nextBid) {
+      setMessage(`当前最低出价为 ${formatMoney(nextBid)}`);
+      return;
+    }
+
+    const cleanNickname = nickname.trim();
+    if (!cleanNickname) {
+      setMessage("请先填写出价昵称");
+      return;
+    }
+
     setSubmittingBid(true);
     socketRef.current.emit(
       "auction:bid",
       {
         userId,
-        nickname,
+        nickname: cleanNickname,
         price,
         clientRequestId: `${userId}-${Date.now()}-${Math.random().toString(16).slice(2)}`
       },
@@ -197,8 +254,9 @@ export function App() {
     );
   }
 
-  async function runAiTask(type: "script" | "summary" | "risk") {
+  async function runAiTask(type: AiTask) {
     setAiLoading(true);
+    setAiTask(type);
     setAiResult(null);
 
     try {
@@ -231,6 +289,7 @@ export function App() {
       setMessage("AI 助手暂时不可用，请稍后重试");
     } finally {
       setAiLoading(false);
+      setAiTask(null);
     }
   }
 
@@ -270,6 +329,7 @@ export function App() {
           <div>
             <p className="eyebrow">实时竞拍大师</p>
             <h1>直播间竞拍控制台</h1>
+            <p className="topbar-meta">{syncLabel} / Socket.IO 多端广播</p>
           </div>
           <div className={connected ? "connection online" : "connection offline"}>
             {connected ? <Wifi size={18} /> : <WifiOff size={18} />}
@@ -286,6 +346,13 @@ export function App() {
           <div className="live-overlay">
             <p>抖音电商直播模拟</p>
             <strong>{snapshot.product.name}</strong>
+            <div className="live-meta">
+              <span>
+                <TrendingUp size={15} />
+                当前价 {formatMoney(snapshot.auction.currentPrice)}
+              </span>
+              <span>{snapshot.participantCount} 人围观出价</span>
+            </div>
           </div>
         </div>
 
@@ -294,8 +361,11 @@ export function App() {
             <p className="eyebrow">当前商品</p>
             <h2>{snapshot.product.name}</h2>
             <p>{snapshot.product.description}</p>
+            <p className="product-note">{stageDetail}</p>
           </div>
-          <div className="status-pill">{statusText[snapshot.auction.status]}</div>
+          <div className={`status-pill status-${snapshot.auction.status.toLowerCase()}`}>
+            {statusText[snapshot.auction.status]}
+          </div>
         </div>
 
         <div className="stats-grid">
@@ -311,23 +381,43 @@ export function App() {
           <AlertTriangle size={18} />
           <span>{message}</span>
         </div>
+        <div className="sync-strip">
+          <span>{syncLabel}</span>
+          <span>{connected ? "实时广播已开启" : "正在恢复连接"}</span>
+        </div>
 
         <section className="panel-section">
           <div className="section-title">
             <Timer size={18} />
             <h2>竞拍状态</h2>
           </div>
+          <div className="status-summary">
+            <span>{stageLabel}</span>
+            <strong>{statusText[snapshot.auction.status]}</strong>
+          </div>
           <div className="countdown">{formatRemaining(remaining)}</div>
           <div className="progress">
             <span style={{ width: `${progress}%` }} />
           </div>
+          {inExtendWindow ? (
+            <div className="extend-alert">已进入自动延时窗口，新的有效出价会延长结束时间</div>
+          ) : null}
           <div className="rule-list">
+            <span>封顶进度：{progress.toFixed(0)}%</span>
             <span>延时阈值：结束前 {snapshot.auction.extendThresholdSeconds} 秒</span>
             <span>每次延时：{snapshot.auction.extendSeconds} 秒</span>
             <span>
               延时次数：{snapshot.auction.extendCount}/{snapshot.auction.maxExtendCount}
             </span>
           </div>
+          {lastBid ? (
+            <div className="latest-bid">
+              <span>最新出价</span>
+              <strong>
+                {lastBid.nickname} / {formatMoney(lastBid.price)}
+              </strong>
+            </div>
+          ) : null}
         </section>
 
         <section className="panel-section">
@@ -349,9 +439,10 @@ export function App() {
               onChange={(event) => setBidPrice(event.target.value)}
             />
           </label>
+          <p className={canBid ? "bid-helper ok" : "bid-helper"}>{bidFeedback}</p>
           <button
             className="primary-button"
-            disabled={snapshot.auction.status !== "ACTIVE" || submittingBid}
+            disabled={!canBid}
             onClick={placeUserBid}
           >
             {submittingBid ? "出价提交中" : `出价 ${formatMoney(Number(bidPrice || nextBid))}`}
@@ -365,26 +456,50 @@ export function App() {
           </div>
           <div className="button-row ai-actions">
             <button disabled={aiLoading} onClick={() => runAiTask("script")}>
-              生成讲解词
+              <FileText size={16} />
+              <span>{aiTask === "script" ? "生成中" : "讲解词"}</span>
             </button>
             <button disabled={aiLoading} onClick={() => runAiTask("summary")}>
-              生成复盘
+              <BarChart3 size={16} />
+              <span>{aiTask === "summary" ? "生成中" : "竞拍复盘"}</span>
             </button>
             <button disabled={aiLoading} onClick={() => runAiTask("risk")}>
-              风险提示
+              <ShieldAlert size={16} />
+              <span>{aiTask === "risk" ? "生成中" : "风险提示"}</span>
             </button>
           </div>
-          {aiResult ? (
+          {aiLoading ? (
+            <div className="ai-box ai-loading">
+              <div className="ai-title">
+                <Sparkles className="spin" size={16} />
+                <strong>{aiTask ? `${aiTaskText[aiTask]}生成中` : "AI 助手生成中"}</strong>
+              </div>
+              <p>正在结合当前竞拍状态生成可演示结果。</p>
+            </div>
+          ) : aiResult ? (
             <div className="ai-box">
               <div className="ai-title">
                 {aiResult.level ? <ShieldAlert size={16} /> : <Bot size={16} />}
                 <strong>{aiResult.title}</strong>
-                <span>{aiResult.source === "model" ? "模型生成" : "本地兜底"}</span>
               </div>
-              <p>{aiResult.content}</p>
+              <div className="ai-meta">
+                <span className={`source-badge source-${aiResult.source}`}>
+                  {aiResult.source === "model" ? "模型生成" : "本地兜底"}
+                </span>
+                {aiResult.level ? (
+                  <span className={`risk-badge risk-${getRiskClass(aiResult.level)}`}>
+                    风险{aiResult.level}
+                  </span>
+                ) : null}
+                <span>{formatTime(aiResult.generatedAt)}</span>
+              </div>
+              <p className="ai-content">{aiResult.content}</p>
             </div>
           ) : (
-            <p className="muted">可生成商品讲解词、竞拍复盘或异常出价提示。</p>
+            <div className="ai-empty">
+              <Sparkles size={18} />
+              <p>可生成商品讲解词、竞拍复盘或异常出价提示。</p>
+            </div>
           )}
         </section>
 
@@ -408,11 +523,22 @@ export function App() {
           </div>
           {snapshot.order ? (
             <div className="order-box">
-              <strong>{snapshot.order.buyerNickname}</strong>
-              <span>成交价：{formatMoney(snapshot.order.finalPrice)}</span>
-              <span>状态：{snapshot.order.status === "PAID" ? "已支付" : "待支付"}</span>
+              <div className="order-head">
+                <UserCheck size={18} />
+                <strong>{snapshot.order.buyerNickname}</strong>
+                <span className={snapshot.order.status === "PAID" ? "pay-status paid" : "pay-status"}>
+                  {snapshot.order.status === "PAID" ? "已支付" : "待支付"}
+                </span>
+              </div>
+              <div className="order-grid">
+                <span>成交价</span>
+                <strong>{formatMoney(snapshot.order.finalPrice)}</strong>
+                <span>订单号</span>
+                <strong>{snapshot.order.id.slice(0, 8)}</strong>
+              </div>
               <button disabled={snapshot.order.status === "PAID"} onClick={payOrder}>
-                模拟支付
+                <CreditCard size={16} />
+                <span>{snapshot.order.status === "PAID" ? "支付已完成" : "模拟支付"}</span>
               </button>
             </div>
           ) : (
@@ -426,9 +552,15 @@ export function App() {
             {snapshot.bids.length === 0 ? (
               <p className="muted">暂无出价</p>
             ) : (
-              snapshot.bids.map((bid) => (
-                <div className="bid-row" key={bid.id}>
-                  <span>{bid.nickname}</span>
+              snapshot.bids.map((bid, index) => (
+                <div className={index === 0 ? "bid-row is-latest" : "bid-row"} key={bid.id}>
+                  <div>
+                    <span>{bid.nickname}</span>
+                    <small>
+                      <Clock3 size={13} />
+                      {formatTime(bid.createdAt)}
+                    </small>
+                  </div>
                   <strong>{formatMoney(bid.price)}</strong>
                 </div>
               ))
@@ -449,12 +581,105 @@ function Metric(props: { label: string; value: string }) {
   );
 }
 
+function getStageLabel(status: AuctionStatus) {
+  if (status === "ACTIVE") {
+    return "距结束";
+  }
+
+  if (status === "PENDING") {
+    return "等待主播开始";
+  }
+
+  if (status === "SOLD") {
+    return "竞拍成交";
+  }
+
+  if (status === "UNSOLD") {
+    return "未产生有效出价";
+  }
+
+  return "流程已取消";
+}
+
+function getStageDetail(snapshot: AuctionSnapshot, remaining: number) {
+  const { auction } = snapshot;
+
+  if (auction.status === "ACTIVE") {
+    return `当前最低可出价 ${formatMoney(auction.currentPrice + auction.incrementStep)}，剩余 ${formatRemaining(remaining)}。`;
+  }
+
+  if (auction.status === "SOLD" && snapshot.order) {
+    return `已生成待支付订单，买家 ${snapshot.order.buyerNickname}，成交价 ${formatMoney(snapshot.order.finalPrice)}。`;
+  }
+
+  if (auction.status === "UNSOLD") {
+    return "倒计时结束且没有有效出价，本场竞拍流拍。";
+  }
+
+  if (auction.status === "CANCELLED") {
+    return "主播已取消本场模拟竞拍，可重新开始演示。";
+  }
+
+  return "点击开始竞拍后，用户出价会通过 Socket.IO 实时同步到所有窗口。";
+}
+
+function getBidFeedback(input: {
+  status: AuctionStatus;
+  connected: boolean;
+  nickname: string;
+  bidAmount: number;
+  nextBid: number;
+}) {
+  if (input.status !== "ACTIVE") {
+    return "竞拍开始后可出价";
+  }
+
+  if (!input.connected) {
+    return "等待实时连接恢复";
+  }
+
+  if (!input.nickname.trim()) {
+    return "请填写昵称后再出价";
+  }
+
+  if (!Number.isFinite(input.bidAmount) || input.bidAmount <= 0) {
+    return `最低出价 ${formatMoney(input.nextBid)}`;
+  }
+
+  if (input.bidAmount < input.nextBid) {
+    return `当前最低出价 ${formatMoney(input.nextBid)}`;
+  }
+
+  return "本次出价满足规则，提交后会实时广播";
+}
+
+function getRiskClass(level: string) {
+  if (level === "高") {
+    return "high";
+  }
+
+  if (level === "中") {
+    return "medium";
+  }
+
+  return "low";
+}
+
 function formatMoney(value: number) {
   return new Intl.NumberFormat("zh-CN", {
     style: "currency",
     currency: "CNY",
     maximumFractionDigits: 0
   }).format(value);
+}
+
+function formatTime(value: number) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  }).format(new Date(value));
 }
 
 function formatRemaining(ms: number) {
