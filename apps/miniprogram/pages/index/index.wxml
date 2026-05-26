@@ -1,0 +1,26 @@
+<view class="page">
+  <view class="header">
+    <text class="eyebrow">实时竞拍</text>
+    <text class="title">选择直播间</text>
+    <text class="muted">{{userText}}</text>
+  </view>
+
+  <view wx:if="{{loading}}" class="card muted">正在加载直播间...</view>
+  <view wx:elif="{{error}}" class="card error">{{error}}</view>
+
+  <view wx:else>
+    <view
+      wx:for="{{rooms}}"
+      wx:key="id"
+      class="room-card"
+      bindtap="openLive"
+      data-id="{{item.id}}"
+    >
+      <view>
+        <text class="room-title">{{item.title}}</text>
+        <text class="room-meta">{{item.hostName}} / {{item.viewerCount}} 人观看</text>
+      </view>
+      <text class="room-id">{{item.id}}</text>
+    </view>
+  </view>
+</view>

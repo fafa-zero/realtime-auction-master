@@ -1,0 +1,43 @@
+.header {
+  display: grid;
+  gap: 10rpx;
+  margin-bottom: 28rpx;
+}
+
+.title {
+  font-size: 48rpx;
+  font-weight: 900;
+}
+
+.room-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+  margin-bottom: 18rpx;
+  padding: 28rpx;
+  border: 1rpx solid #d9e1e7;
+  border-radius: 12rpx;
+  background: #ffffff;
+}
+
+.room-title {
+  display: block;
+  margin-bottom: 10rpx;
+  font-size: 34rpx;
+  font-weight: 900;
+}
+
+.room-meta,
+.room-id {
+  color: #60717f;
+  font-size: 24rpx;
+}
+
+.room-id {
+  font-weight: 800;
+}
+
+.error {
+  color: #ad1f31;
+}

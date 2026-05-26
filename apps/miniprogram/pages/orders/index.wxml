@@ -1,0 +1,24 @@
+<view class="page">
+  <view class="header">
+    <text class="eyebrow">买家中心</text>
+    <text class="title">我的订单</text>
+    <text class="muted">{{liveRoomId ? "当前直播间：" + liveRoomId : "全部直播间"}}</text>
+  </view>
+
+  <view wx:if="{{loading}}" class="card muted">正在加载订单...</view>
+  <view wx:elif="{{error}}" class="card error">{{error}}</view>
+
+  <view wx:else>
+    <view wx:if="{{orders.length === 0}}" class="card muted">暂无订单</view>
+    <view wx:for="{{orders}}" wx:key="id" class="order-card">
+      <view>
+        <text class="buyer">{{item.buyerNickname}}</text>
+        <text class="muted">订单号 {{item.shortId}}</text>
+      </view>
+      <view class="order-side">
+        <text class="price">{{item.finalPriceText}}</text>
+        <text class="status">{{item.statusText}}</text>
+      </view>
+    </view>
+  </view>
+</view>

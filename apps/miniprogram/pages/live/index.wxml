@@ -1,0 +1,85 @@
+<view class="page">
+  <view wx:if="{{loading}}" class="card muted">正在进入直播间...</view>
+  <view wx:elif="{{error}}" class="card error">{{error}}</view>
+
+  <view wx:else>
+    <view class="stage">
+      <image src="{{snapshot.product.imageUrl}}" mode="aspectFill" />
+      <view class="stage-overlay">
+        <text class="live-badge">LIVE</text>
+        <text class="stage-title">{{room.title}}</text>
+        <text class="stage-meta">{{room.hostName}} / {{room.viewerCount}} 人观看</text>
+      </view>
+    </view>
+
+    <view class="card product">
+      <text class="eyebrow">当前商品</text>
+      <text class="product-name">{{snapshot.product.name}}</text>
+      <text class="muted">{{snapshot.product.description}}</text>
+    </view>
+
+    <view class="stats">
+      <view class="stat">
+        <text>当前价</text>
+        <text class="price">{{currentPriceText}}</text>
+      </view>
+      <view class="stat">
+        <text>最低加价</text>
+        <text>{{incrementText}}</text>
+      </view>
+      <view class="stat">
+        <text>封顶价</text>
+        <text>{{ceilingText}}</text>
+      </view>
+      <view class="stat">
+        <text>倒计时</text>
+        <text>{{remainingText}}</text>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="bid-head">
+        <text class="section-title">我要出价</text>
+        <text class="status">{{statusText}}</text>
+      </view>
+      <input
+        type="number"
+        value="{{bidPrice}}"
+        placeholder="请输入出价金额"
+        bindinput="onBidInput"
+      />
+      <button class="primary" disabled="{{!canBid || submitting}}" bindtap="submitBid">
+        {{submitting ? "提交中" : bidButtonText}}
+      </button>
+      <text class="hint">{{hint}}</text>
+    </view>
+
+    <view wx:if="{{snapshot.order}}" class="card">
+      <text class="section-title">成交结果</text>
+      <view class="order-line">
+        <text>{{snapshot.order.buyerNickname}}</text>
+        <text class="price">{{orderPriceText}}</text>
+      </view>
+      <button class="secondary" disabled="{{snapshot.order.status === 'PAID'}}" bindtap="payCurrentOrder">
+        {{snapshot.order.status === "PAID" ? "已支付" : "模拟支付"}}
+      </button>
+    </view>
+
+    <view class="card">
+      <view class="bid-head">
+        <text class="section-title">实时出价</text>
+        <text class="muted">{{snapshot.participantCount}} 人参与</text>
+      </view>
+      <view wx:if="{{snapshot.bids.length === 0}}" class="muted">暂无出价</view>
+      <view wx:for="{{snapshot.bids}}" wx:key="id" class="bid-row">
+        <view>
+          <text>{{item.nickname}}</text>
+          <text class="muted time">{{item.createdAtText}}</text>
+        </view>
+        <text class="price">{{item.priceText}}</text>
+      </view>
+    </view>
+
+    <button class="secondary" bindtap="openOrders">我的订单</button>
+  </view>
+</view>

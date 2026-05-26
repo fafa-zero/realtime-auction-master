@@ -1,0 +1,14 @@
+{
+  "description": "Realtime auction buyer miniprogram prototype",
+  "appid": "touristappid",
+  "projectname": "realtime-auction-miniprogram",
+  "miniprogramRoot": "./",
+  "compileType": "miniprogram",
+  "setting": {
+    "urlCheck": false,
+    "es6": true,
+    "enhance": true,
+    "postcss": true,
+    "minified": true
+  }
+}
