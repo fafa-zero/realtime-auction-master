@@ -14,7 +14,6 @@ export async function completeWithModel(input: {
   userPrompt: string;
   fallbackContent: string;
 }): Promise<AiResult> {
-  const fallback = createFallback(input.title, input.fallbackContent);
   const apiUrl = process.env.AI_API_URL;
   const apiKey = process.env.AI_API_KEY;
   const model = process.env.AI_MODEL;
