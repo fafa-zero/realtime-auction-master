@@ -5,6 +5,9 @@ import { Server } from "socket.io";
 import { z } from "zod";
 import {
   cancelAuction,
+  detectBidRisk,
+  generateAuctionSummary,
+  generateProductScript,
   getAuction,
   getSnapshot,
   payOrder,
@@ -75,6 +78,27 @@ app.post("/api/orders/:orderId/pay", (req, res) => {
   }
 });
 
+app.post("/api/ai/product-script", async (_req, res) => {
+  res.json(await generateProductScript());
+});
+
+app.post("/api/ai/auction-summary", async (_req, res) => {
+  res.json(await generateAuctionSummary());
+});
+
+app.post("/api/ai/bid-risk", async (req, res) => {
+  try {
+    const schema = z.object({
+      userId: z.string().min(1),
+      price: z.number().positive()
+    });
+    const input = schema.parse(req.body);
+    res.json(await detectBidRisk(input));
+  } catch (error) {
+    res.status(400).json({ message: getErrorMessage(error) });
+  }
+});
+
 io.on("connection", (socket) => {
   socket.join(ROOM_ID);
   socket.emit("auction:snapshot", getSnapshot());
@@ -89,7 +113,8 @@ io.on("connection", (socket) => {
       const schema = z.object({
         userId: z.string().min(1),
         nickname: z.string().min(1),
-        price: z.number().positive()
+        price: z.number().positive(),
+        clientRequestId: z.string().min(1)
       });
       const input = schema.parse(payload);
       const result = placeBid(input);

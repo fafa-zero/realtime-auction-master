@@ -6,6 +6,7 @@
 
 - 前端：React + TypeScript + Vite
 - 后端：Node.js + Express + Socket.IO
+- AI 辅助：兼容大模型 API 的 AI 助手接口，本地兜底生成
 - 第一阶段存储：内存数据
 - 后续扩展：MySQL / PostgreSQL + Redis
 
@@ -29,6 +30,9 @@ realtime-auction-master
 - 达到封顶价自动成交
 - 主播取消异常竞拍
 - 成交后生成模拟订单
+- AI 生成商品讲解词
+- AI 生成竞拍复盘总结
+- AI 生成异常出价提示
 
 ## 运行方式
 
@@ -49,6 +53,20 @@ npm run dev
 - 前端：http://localhost:5173
 - 后端：http://localhost:4000
 
+## AI 配置
+
+AI 助手默认可以在不配置模型的情况下运行，系统会使用本地兜底策略生成商品讲解词、竞拍复盘和风险提示。
+
+如果需要接入兼容 OpenAI Chat Completions 格式的大模型接口，可配置：
+
+```bash
+AI_API_URL=https://api.example.com/v1/chat/completions
+AI_API_KEY=your_api_key
+AI_MODEL=your_model_name
+```
+
+未配置或模型调用失败时，接口会自动返回本地兜底结果，保证演示流程不中断。
+
 ## 演示流程
 
 1. 打开前端页面。
@@ -58,6 +76,7 @@ npm run dev
 5. 在倒计时最后 10 秒内出价，观察自动延时。
 6. 出价达到封顶价，观察自动成交和订单生成。
 7. 点击“模拟支付”，观察订单状态变为已支付。
+8. 点击 AI 竞拍助手按钮，生成讲解词、竞拍复盘或异常出价提示。
 
 ## 关键代码位置
 

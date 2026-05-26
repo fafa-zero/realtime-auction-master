@@ -1,5 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, BadgeCheck, CircleDollarSign, Radio, RotateCcw, Timer, Wifi, WifiOff } from "lucide-react";
+import {
+  AlertTriangle,
+  BadgeCheck,
+  Bot,
+  CircleDollarSign,
+  Radio,
+  RotateCcw,
+  ShieldAlert,
+  Timer,
+  Wifi,
+  WifiOff
+} from "lucide-react";
 import { io, type Socket } from "socket.io-client";
 import type { AuctionSnapshot } from "./types";
 
@@ -13,6 +24,14 @@ const statusText = {
   CANCELLED: "已取消"
 };
 
+type AiResult = {
+  title: string;
+  content: string;
+  generatedAt: number;
+  source: "model" | "fallback";
+  level?: string;
+};
+
 export function App() {
   const [snapshot, setSnapshot] = useState<AuctionSnapshot | null>(null);
   const [connected, setConnected] = useState(false);
@@ -21,12 +40,17 @@ export function App() {
   const [bidPrice, setBidPrice] = useState("");
   const [message, setMessage] = useState("正在连接竞拍服务...");
   const [now, setNow] = useState(Date.now());
+  const [serverOffset, setServerOffset] = useState(0);
+  const [submittingBid, setSubmittingBid] = useState(false);
+  const [aiResult, setAiResult] = useState<AiResult | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
     fetch(`${API_URL}/api/auction`)
       .then((res) => res.json())
       .then((data: AuctionSnapshot) => {
+        syncSnapshotClock(data);
         setSnapshot(data);
         setBidPrice(String(data.auction.currentPrice + data.auction.incrementStep));
       })
@@ -51,6 +75,7 @@ export function App() {
     });
 
     const updateSnapshot = (data: AuctionSnapshot) => {
+      syncSnapshotClock(data);
       setSnapshot((current) => {
         if (current && data.auction.version < current.auction.version) {
           return current;
@@ -84,6 +109,10 @@ export function App() {
     });
     socket.on("order:paid", updateSnapshot);
 
+    function syncSnapshotClock(data: AuctionSnapshot) {
+      setServerOffset(data.serverTime - Date.now());
+    }
+
     return () => {
       socket.disconnect();
     };
@@ -99,8 +128,8 @@ export function App() {
       return 0;
     }
 
-    return Math.max(0, snapshot.auction.endTime - now);
-  }, [now, snapshot?.auction.endTime]);
+    return Math.max(0, snapshot.auction.endTime - (now + serverOffset));
+  }, [now, serverOffset, snapshot?.auction.endTime]);
 
   const nextBid = snapshot ? snapshot.auction.currentPrice + snapshot.auction.incrementStep : 0;
   const progress = snapshot
@@ -142,15 +171,22 @@ export function App() {
     }
 
     const price = Number(bidPrice);
+    if (!Number.isFinite(price) || price <= 0) {
+      setMessage("请输入有效出价金额");
+      return;
+    }
 
+    setSubmittingBid(true);
     socketRef.current.emit(
       "auction:bid",
       {
         userId,
         nickname,
-        price
+        price,
+        clientRequestId: `${userId}-${Date.now()}-${Math.random().toString(16).slice(2)}`
       },
       (response: { ok: boolean; message?: string }) => {
+        setSubmittingBid(false);
         if (!response.ok) {
           setMessage(response.message ?? "出价失败");
           return;
@@ -159,6 +195,43 @@ export function App() {
         setMessage("出价成功，等待广播同步");
       }
     );
+  }
+
+  async function runAiTask(type: "script" | "summary" | "risk") {
+    setAiLoading(true);
+    setAiResult(null);
+
+    try {
+      const price = Number(bidPrice || nextBid);
+      const endpoint =
+        type === "script"
+          ? "/api/ai/product-script"
+          : type === "summary"
+            ? "/api/ai/auction-summary"
+            : "/api/ai/bid-risk";
+      const init =
+        type === "risk"
+          ? {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ userId, price })
+            }
+          : { method: "POST" };
+      const res = await fetch(`${API_URL}${endpoint}`, init);
+      const data = await res.json();
+
+      if (!res.ok) {
+        setMessage(data.message ?? "AI 助手生成失败");
+        return;
+      }
+
+      setAiResult(data);
+      setMessage(data.source === "model" ? "AI 助手已生成结果" : "已使用本地 AI 兜底策略生成结果");
+    } catch {
+      setMessage("AI 助手暂时不可用，请稍后重试");
+    } finally {
+      setAiLoading(false);
+    }
   }
 
   async function payOrder() {
@@ -276,9 +349,43 @@ export function App() {
               onChange={(event) => setBidPrice(event.target.value)}
             />
           </label>
-          <button className="primary-button" disabled={snapshot.auction.status !== "ACTIVE"} onClick={placeUserBid}>
-            出价 {formatMoney(Number(bidPrice || nextBid))}
+          <button
+            className="primary-button"
+            disabled={snapshot.auction.status !== "ACTIVE" || submittingBid}
+            onClick={placeUserBid}
+          >
+            {submittingBid ? "出价提交中" : `出价 ${formatMoney(Number(bidPrice || nextBid))}`}
           </button>
+        </section>
+
+        <section className="panel-section">
+          <div className="section-title">
+            <Bot size={18} />
+            <h2>AI 竞拍助手</h2>
+          </div>
+          <div className="button-row ai-actions">
+            <button disabled={aiLoading} onClick={() => runAiTask("script")}>
+              生成讲解词
+            </button>
+            <button disabled={aiLoading} onClick={() => runAiTask("summary")}>
+              生成复盘
+            </button>
+            <button disabled={aiLoading} onClick={() => runAiTask("risk")}>
+              风险提示
+            </button>
+          </div>
+          {aiResult ? (
+            <div className="ai-box">
+              <div className="ai-title">
+                {aiResult.level ? <ShieldAlert size={16} /> : <Bot size={16} />}
+                <strong>{aiResult.title}</strong>
+                <span>{aiResult.source === "model" ? "模型生成" : "本地兜底"}</span>
+              </div>
+              <p>{aiResult.content}</p>
+            </div>
+          ) : (
+            <p className="muted">可生成商品讲解词、竞拍复盘或异常出价提示。</p>
+          )}
         </section>
 
         <section className="panel-section">

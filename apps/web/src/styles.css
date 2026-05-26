@@ -336,6 +336,10 @@ h2 {
   gap: 10px;
 }
 
+.ai-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .danger {
   border-color: #f0b8c0;
   color: var(--accent-dark);
@@ -349,6 +353,34 @@ h2 {
 
 .order-box button {
   margin-top: 4px;
+}
+
+.ai-box {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #dbe7ef;
+  border-radius: 8px;
+  background: #f7fafc;
+}
+
+.ai-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-title span {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ai-box p {
+  margin-bottom: 0;
+  color: #334250;
+  line-height: 1.65;
 }
 
 .bid-list {
@@ -401,7 +433,8 @@ h2 {
   }
 
   .stats-grid,
-  .button-row {
+  .button-row,
+  .ai-actions {
     grid-template-columns: 1fr;
   }
 

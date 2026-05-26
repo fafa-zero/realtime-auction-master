@@ -14,6 +14,7 @@ export interface Bid {
   nickname: string;
   price: number;
   createdAt: number;
+  clientRequestId: string;
 }
 
 export interface Order {
