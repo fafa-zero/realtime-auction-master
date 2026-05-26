@@ -450,6 +450,52 @@ h2 {
   background: var(--accent-dark);
 }
 
+.demo-panel {
+  background: #fffdf8;
+}
+
+.demo-bid-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.demo-bid-grid button {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  min-height: 58px;
+  padding: 8px;
+  text-align: left;
+}
+
+.demo-bid-grid button span,
+.demo-bid-grid button strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.demo-bid-grid button span {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.demo-bid-grid button strong {
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.ceiling-button {
+  width: 100%;
+  margin-top: 10px;
+  border-color: #f0b8c0;
+  color: var(--accent-dark);
+  background: #fff1f3;
+  font-weight: 800;
+}
+
 .button-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -697,7 +743,8 @@ h2 {
 
   .stats-grid,
   .button-row,
-  .ai-actions {
+  .ai-actions,
+  .demo-bid-grid {
     grid-template-columns: 1fr;
   }
 
