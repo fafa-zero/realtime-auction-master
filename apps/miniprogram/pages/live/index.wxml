@@ -1,14 +1,14 @@
 <view class="page">
-  <view wx:if="{{loading}}" class="card muted">正在进入直播间...</view>
+  <view wx:if="{{loading}}" class="card muted">正在进入专场...</view>
   <view wx:elif="{{error}}" class="card error">{{error}}</view>
 
   <view wx:else>
     <view class="stage">
       <image src="{{snapshot.product.imageUrl}}" mode="aspectFill" />
       <view class="stage-overlay">
-        <text class="live-badge">LIVE</text>
+        <text class="live-badge">ON</text>
         <text class="stage-title">{{room.title}}</text>
-        <text class="stage-meta">{{room.hostName}} / {{room.viewerCount}} 人观看</text>
+        <text class="stage-meta">{{room.hostName}} / {{room.viewerCount}} 人浏览</text>
         <text class="realtime">{{realtimeText}}</text>
       </view>
     </view>
@@ -40,13 +40,13 @@
 
     <view class="card">
       <view class="bid-head">
-        <text class="section-title">我要出价</text>
+        <text class="section-title">我要参与</text>
         <text class="status">{{statusText}}</text>
       </view>
       <input
         type="number"
         value="{{bidPrice}}"
-        placeholder="请输入出价金额"
+        placeholder="请输入参与金额"
         bindinput="onBidInput"
       />
       <button class="primary" disabled="{{!canBid || submitting}}" bindtap="submitBid">
@@ -56,7 +56,7 @@
     </view>
 
     <view wx:if="{{snapshot.order}}" class="card">
-      <text class="section-title">成交结果</text>
+      <text class="section-title">确认结果</text>
       <view class="order-line">
         <text>{{snapshot.order.buyerNickname}}</text>
         <text class="price">{{orderPriceText}}</text>
@@ -68,10 +68,10 @@
 
     <view class="card">
       <view class="bid-head">
-        <text class="section-title">实时出价</text>
+        <text class="section-title">实时记录</text>
         <text class="muted">{{snapshot.participantCount}} 人参与</text>
       </view>
-      <view wx:if="{{snapshot.bids.length === 0}}" class="muted">暂无出价</view>
+      <view wx:if="{{snapshot.bids.length === 0}}" class="muted">暂无记录</view>
       <view wx:for="{{snapshot.bids}}" wx:key="id" class="bid-row">
         <view>
           <text>{{item.nickname}}</text>

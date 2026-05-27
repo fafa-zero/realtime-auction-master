@@ -13,30 +13,30 @@ const products: Product[] = [
     name: "天然翡翠吊坠",
     imageUrl:
       "https://images.unsplash.com/photo-1605100804763-247f67b3557e?auto=format&fit=crop&w=900&q=80",
-    description: "模拟直播间竞拍商品，适合用于演示实时出价、自动延时和封顶成交流程。"
+    description: "好物专场演示商品，适合用于演示实时互动、价格更新和订单确认流程。"
   },
   {
     id: "product-2",
     name: "复古机械腕表",
     imageUrl:
       "https://images.unsplash.com/photo-1522312346375-d1a52e2b99b3?auto=format&fit=crop&w=900&q=80",
-    description: "第二直播间演示商品，用于验证多直播间状态隔离和观众入口切换。"
+    description: "第二个好物专场演示商品，用于验证多专场状态隔离和用户入口切换。"
   }
 ];
 
 const liveRooms: LiveRoom[] = [
   {
     id: "live-1",
-    title: "珠宝严选竞拍直播间",
-    hostName: "主播小雅",
+    title: "珠宝严选好物专场",
+    hostName: "小雅",
     streamUrl: "https://example.com/mock/jewelry-live.m3u8",
     viewerCount: 1286,
     currentAuctionId: "auction-1"
   },
   {
     id: "live-2",
-    title: "腕表收藏竞拍直播间",
-    hostName: "主播阿辰",
+    title: "腕表收藏好物专场",
+    hostName: "阿辰",
     streamUrl: "https://example.com/mock/watch-live.m3u8",
     viewerCount: 842,
     currentAuctionId: "auction-2"
@@ -232,7 +232,7 @@ export function startAuction(liveRoomIdOrOptions: string | StartAuctionOptions =
   const auction = requireAuctionForLiveRoom(liveRoomId);
 
   if (auction.status !== "PENDING" && auction.status !== "UNSOLD" && auction.status !== "SOLD" && auction.status !== "CANCELLED") {
-    throw new Error("当前竞拍状态不允许开始");
+    throw new Error("当前专场状态不允许开始");
   }
 
   archiveCurrentAuction(liveRoomId);
@@ -254,7 +254,7 @@ export function startAuction(liveRoomIdOrOptions: string | StartAuctionOptions =
   }
 
   if (auction.ceilingPrice < auction.startPrice + auction.incrementStep) {
-    throw new Error("封顶价必须高于最低首次出价");
+    throw new Error("封顶价必须高于最低参与金额");
   }
 
   auction.currentPrice = auction.startPrice;
@@ -270,13 +270,13 @@ export function startAuction(liveRoomIdOrOptions: string | StartAuctionOptions =
   return getSnapshot(liveRoomId);
 }
 
-export function cancelAuction(liveRoomIdOrReason = DEFAULT_LIVE_ROOM_ID, maybeReason = "主播取消竞拍") {
+export function cancelAuction(liveRoomIdOrReason = DEFAULT_LIVE_ROOM_ID, maybeReason = "专场已取消") {
   const liveRoomId = isKnownLiveRoom(liveRoomIdOrReason) ? liveRoomIdOrReason : DEFAULT_LIVE_ROOM_ID;
   const reason = isKnownLiveRoom(liveRoomIdOrReason) ? maybeReason : liveRoomIdOrReason;
   const auction = requireAuctionForLiveRoom(liveRoomId);
 
   if (auction.status !== "PENDING" && auction.status !== "ACTIVE") {
-    throw new Error("当前竞拍状态不允许取消");
+    throw new Error("当前专场状态不允许取消");
   }
 
   auction.status = "CANCELLED";
@@ -313,24 +313,24 @@ export function placeBid(input: {
   }
 
   if (auction.status !== "ACTIVE") {
-    throw new Error("竞拍未进行，无法出价");
+    throw new Error("专场未开始，无法参与");
   }
 
   if (!auction.endTime) {
-    throw new Error("竞拍已结束，无法出价");
+    throw new Error("专场已结束，无法参与");
   }
 
   if (now >= auction.endTime) {
-    throw new Error("竞拍已结束，无法出价");
+    throw new Error("专场已结束，无法参与");
   }
 
   const minPrice = auction.currentPrice + auction.incrementStep;
   if (input.price < minPrice) {
-    throw new Error(`出价过低，最低出价为 ${minPrice} 元`);
+    throw new Error(`金额过低，最低参与金额为 ${minPrice} 元`);
   }
 
   if (input.price > auction.ceilingPrice) {
-    throw new Error(`出价不能超过封顶价 ${auction.ceilingPrice} 元`);
+    throw new Error(`金额不能超过封顶价 ${auction.ceilingPrice} 元`);
   }
 
   const bid: Bid = {
@@ -765,7 +765,7 @@ function requireLiveRoom(liveRoomId: string) {
   const liveRoom = liveRooms.find((room) => room.id === liveRoomId);
 
   if (!liveRoom) {
-    throw new Error("直播间不存在");
+    throw new Error("专场不存在");
   }
 
   return liveRoom;
@@ -780,7 +780,7 @@ function requireAuction(auctionId: string) {
   const auction = auctions.find((item) => item.id === auctionId);
 
   if (!auction) {
-    throw new Error("竞拍不存在");
+    throw new Error("专场不存在");
   }
 
   return auction;

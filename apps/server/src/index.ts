@@ -195,10 +195,10 @@ function handleStartAuction(body: unknown, liveRoomId: string, res: express.Resp
     assertLiveRoom(liveRoomId);
     const schema = z.object({
       durationSeconds: z
-        .number({ invalid_type_error: "竞拍时长必须是数字" })
-        .int("竞拍时长必须是整数")
-        .min(15, "竞拍时长不能少于 15 秒")
-        .max(600, "竞拍时长不能超过 600 秒")
+        .number({ invalid_type_error: "专场时长必须是数字" })
+        .int("专场时长必须是整数")
+        .min(15, "专场时长不能少于 15 秒")
+        .max(600, "专场时长不能超过 600 秒")
         .optional(),
       incrementStep: z
         .number({ invalid_type_error: "最低加价必须是数字" })
@@ -260,7 +260,7 @@ function handlePlaceBid(body: unknown, liveRoomId: string, res: express.Response
     const schema = z.object({
       userId: z.string().min(1, "用户 ID 不能为空").optional(),
       nickname: z.string().min(1, "昵称不能为空").optional(),
-      price: z.number({ invalid_type_error: "出价金额必须是数字" }).positive("出价金额必须大于 0"),
+      price: z.number({ invalid_type_error: "参与金额必须是数字" }).positive("参与金额必须大于 0"),
       clientRequestId: z.string().min(1, "请求 ID 不能为空")
     });
     const input = schema.parse(body);
@@ -511,7 +511,7 @@ function getErrorMessage(error: unknown) {
 
 function getErrorStatus(error: unknown) {
   const message = getErrorMessage(error);
-  return message.includes("直播间不存在") ? 404 : 401;
+  return message.includes("专场不存在") ? 404 : 401;
 }
 
 function createAiErrorResponse(message: string) {

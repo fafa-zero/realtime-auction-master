@@ -1,6 +1,13 @@
-# 实时竞拍小程序原型
+# 好物助手小程序原型
 
-这是买家侧微信小程序原型，用于演示“用户登录小程序看直播并参与竞拍”的最终形态。
+这是买家侧微信小程序原型，用于演示“用户登录小程序查看好物专场并参与互动购买”的最终形态。
+
+## 名称建议
+
+- 小程序名称：好物助手
+- 小程序简称：好物助手
+
+“好物助手”共 4 个中文字，按微信规则计 8 个字符，满足名称 4-30 个字符限制，也满足简称 4-10 个字符限制。名称避开个人主体不适合备案的高资质业务表述。
 
 ## 本地联调
 
@@ -31,12 +38,12 @@ ws://localhost:4200/miniprogram-ws
 
 ## 当前能力
 
-- `pages/index`：直播间列表。
-- `pages/live/index`：直播间详情、模拟直播画面、竞拍快照、出价、成交后模拟支付。
+- `pages/index`：好物专场列表。
+- `pages/live/index`：专场详情、商品画面、实时快照、参与金额、确认后模拟支付。
 - `pages/orders/index`：我的订单。
 - 登录使用 `/api/auth/miniprogram/login` 的 `mockCode` 演示模式。
 - 实时同步优先使用小程序原生 `wx.connectSocket`，消息格式为 JSON `type + payload`。
-- WebSocket 断开时直播页会临时降级为 REST 轮询。
+- WebSocket 断开时详情页会临时降级为 REST 轮询。
 
 ## 生产边界
 
@@ -45,5 +52,5 @@ ws://localhost:4200/miniprogram-ws
 - 正式微信 `appId`。
 - `wx.login` + 后端 `code2Session`。
 - HTTPS request 合法域名和 WSS socket 合法域名。
-- 真实直播流组件权限和直播服务。
+- 真实音视频组件权限和内容服务。
 - 微信支付沙箱或正式支付。

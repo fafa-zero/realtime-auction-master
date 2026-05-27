@@ -2,7 +2,7 @@
   <view class="header">
     <text class="eyebrow">买家中心</text>
     <text class="title">我的订单</text>
-    <text class="muted">{{liveRoomId ? "当前直播间：" + liveRoomId : "全部直播间"}}</text>
+    <text class="muted">{{liveRoomId ? "当前专场：" + liveRoomId : "全部专场"}}</text>
   </view>
 
   <view wx:if="{{loading}}" class="card muted">正在加载订单...</view>

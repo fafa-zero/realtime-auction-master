@@ -5,7 +5,7 @@
     "pages/orders/index"
   ],
   "window": {
-    "navigationBarTitleText": "实时竞拍",
+    "navigationBarTitleText": "好物助手",
     "navigationBarBackgroundColor": "#17212b",
     "navigationBarTextStyle": "white",
     "backgroundColor": "#f3f6f8"

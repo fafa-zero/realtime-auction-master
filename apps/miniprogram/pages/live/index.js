@@ -3,9 +3,9 @@ const { money, remaining, time } = require("../../utils/format");
 
 const statusMap = {
   PENDING: "待开始",
-  ACTIVE: "竞拍中",
+  ACTIVE: "进行中",
   SOLD: "已成交",
-  UNSOLD: "已流拍",
+  UNSOLD: "已结束",
   CANCELLED: "已取消"
 };
 
@@ -25,8 +25,8 @@ Page({
     ceilingText: "¥0",
     orderPriceText: "¥0",
     statusText: "待开始",
-    bidButtonText: "出价",
-    hint: "竞拍开始后可出价",
+    bidButtonText: "参与",
+    hint: "开始后可参与",
     realtimeText: "实时连接准备中",
     canBid: false
   },
@@ -64,7 +64,7 @@ Page({
       this.applySnapshot(snapshot);
       this.setData({ room: roomData.room });
     } catch (error) {
-      this.setData({ error: error.message || "进入直播间失败" });
+      this.setData({ error: error.message || "进入专场失败" });
     } finally {
       this.setData({ loading: false });
     }
@@ -79,7 +79,7 @@ Page({
       const snapshot = await getAuctionSnapshot(this.data.liveRoomId);
       this.applySnapshot(snapshot);
     } catch {
-      this.setData({ hint: "网络波动，正在恢复直播间数据" });
+      this.setData({ hint: "网络波动，正在恢复专场数据" });
     }
   },
 
@@ -154,7 +154,7 @@ Page({
 
       if (message.type === "auction:cancelled") {
         this.applySnapshot(message.payload.snapshot);
-        this.setData({ realtimeText: "竞拍已取消" });
+        this.setData({ realtimeText: "本场已取消" });
         return;
       }
 
@@ -204,8 +204,8 @@ Page({
     this.setData({
       remainingText: remaining(snapshot.auction.endTime, this.data.serverOffset),
       canBid,
-      bidButtonText: `出价 ${money(Number(this.data.bidPrice || nextBid))}`,
-      hint: canBid ? "本次出价满足规则" : snapshot.auction.status === "ACTIVE" ? `最低出价 ${money(nextBid)}` : "竞拍开始后可出价"
+      bidButtonText: `参与 ${money(Number(this.data.bidPrice || nextBid))}`,
+      hint: canBid ? "本次金额满足规则" : snapshot.auction.status === "ACTIVE" ? `最低金额 ${money(nextBid)}` : "开始后可参与"
     });
   },
 
@@ -219,7 +219,7 @@ Page({
       return;
     }
 
-    this.setData({ submitting: true, hint: "正在提交出价..." });
+    this.setData({ submitting: true, hint: "正在提交..." });
 
     try {
       const clientRequestId = `mp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -236,7 +236,7 @@ Page({
             }
           })
         });
-        this.setData({ hint: "出价已提交，等待实时同步" });
+        this.setData({ hint: "已提交，等待实时同步" });
         return;
       }
 
@@ -246,9 +246,9 @@ Page({
       });
 
       this.applySnapshot(result.snapshot);
-      this.setData({ hint: "出价成功" });
+      this.setData({ hint: "提交成功" });
     } catch (error) {
-      this.setData({ hint: error.message || "出价失败" });
+      this.setData({ hint: error.message || "提交失败" });
     } finally {
       this.setData({ submitting: false });
     }
