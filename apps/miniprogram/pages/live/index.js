@@ -65,13 +65,7 @@ Page({
     submitting: false,
     error: "",
     room: fallbackRoom,
-    snapshot: {
-      ...fallbackSnapshot,
-      product: {
-        ...fallbackSnapshot.product,
-        imageUrl: "/static/jewelry.jpg"
-      }
-    },
+    snapshot: fallbackSnapshot,
     bidPrice: "",
     serverOffset: 0,
     remainingText: "00:00",
