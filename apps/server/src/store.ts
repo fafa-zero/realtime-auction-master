@@ -11,15 +11,13 @@ const products: Product[] = [
   {
     id: "product-1",
     name: "天然翡翠吊坠",
-    imageUrl:
-      "https://images.unsplash.com/photo-1605100804763-247f67b3557e?auto=format&fit=crop&w=900&q=80",
+    imageUrl: "/static/jewelry.jpg",
     description: "好物专场演示商品，适合用于演示实时互动、价格更新和订单确认流程。"
   },
   {
     id: "product-2",
     name: "复古机械腕表",
-    imageUrl:
-      "https://images.unsplash.com/photo-1522312346375-d1a52e2b99b3?auto=format&fit=crop&w=900&q=80",
+    imageUrl: "/static/watch.jpg",
     description: "第二个好物专场演示商品，用于验证多专场状态隔离和用户入口切换。"
   }
 ];

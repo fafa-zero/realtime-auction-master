@@ -1,4 +1,5 @@
 import http from "node:http";
+import path from "node:path";
 import cors from "cors";
 import express from "express";
 import { Server } from "socket.io";
@@ -26,26 +27,53 @@ import {
   updateUserProfileByToken
 } from "./store.js";
 
-const PORT = Number(process.env.PORT ?? 4000);
-const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5173";
+const PORT = Number(process.env.PORT ?? 4200);
+const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5174";
+const CLIENT_ORIGINS = getLocalClientOrigins(CLIENT_URL);
 const DEFAULT_LIVE_ROOM_ID = "live-1";
+const WEB_DIST_DIR = path.resolve(process.cwd(), "../web/dist");
 
 const app = express();
-app.use(cors({ origin: CLIENT_URL }));
+app.use(cors({ origin: CLIENT_ORIGINS }));
 app.use(express.json());
+app.use("/static", express.static(path.resolve(process.cwd(), "public")));
+app.use(express.static(WEB_DIST_DIR));
 
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: CLIENT_URL,
+    origin: CLIENT_ORIGINS,
     methods: ["GET", "POST"]
   }
 });
 const miniprogramWss = new WebSocketServer({ noServer: true });
 const miniprogramClients = new Map<WebSocket, { liveRoomId: string | null }>();
 
+function getLocalClientOrigins(clientUrl: string) {
+  const origins = new Set<string>();
+
+  try {
+    const url = new URL(clientUrl);
+    origins.add(url.origin);
+
+    if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
+      const alternate = new URL(url.toString());
+      alternate.hostname = url.hostname === "localhost" ? "127.0.0.1" : "localhost";
+      origins.add(alternate.origin);
+    }
+  } catch {
+    origins.add(clientUrl);
+  }
+
+  return Array.from(origins);
+}
+
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, serverTime: Date.now() });
+});
+
+app.get(["/", "/host", "/live/:liveRoomId"], (_req, res) => {
+  res.sendFile(path.join(WEB_DIST_DIR, "index.html"));
 });
 
 app.post("/api/auth/miniprogram/login", (req, res) => {
@@ -484,7 +512,9 @@ miniprogramWss.on("connection", (ws) => {
 
       sendMiniprogramEvent(ws, "auction:error", { message: "未知小程序消息类型" });
     } catch (error) {
-      sendMiniprogramEvent(ws, "auction:error", { message: getErrorMessage(error) });
+      const message = getErrorMessage(error);
+      sendMiniprogramEvent(ws, "auction:bid-ack", { ok: false, message });
+      sendMiniprogramEvent(ws, "auction:error", { message });
     }
   });
 
