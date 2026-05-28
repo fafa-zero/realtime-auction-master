@@ -3,6 +3,7 @@
     <text class="eyebrow">好物助手</text>
     <text class="title">选择好物专场</text>
     <text class="muted">{{userText}}</text>
+    <text class="muted">{{apiText}}</text>
   </view>
 
   <view wx:if="{{loading}}" class="card muted">正在加载专场...</view>

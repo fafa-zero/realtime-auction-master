@@ -4,7 +4,8 @@
 
   <view wx:else>
     <view class="stage">
-      <image src="{{snapshot.product.imageUrl}}" mode="aspectFill" />
+      <image wx:if="{{snapshot.product.imageUrl}}" src="{{snapshot.product.imageUrl}}" mode="aspectFill" />
+      <view wx:else class="stage-placeholder">模拟直播画面</view>
       <view class="stage-overlay">
         <text class="live-badge">ON</text>
         <text class="stage-title">{{room.title}}</text>
@@ -36,6 +37,14 @@
         <text>倒计时</text>
         <text>{{remainingText}}</text>
       </view>
+      <view class="stat">
+        <text>当前领先</text>
+        <text>{{leaderText}}</text>
+      </view>
+      <view class="stat">
+        <text>竞拍记录</text>
+        <text>{{bidCountText}}</text>
+      </view>
     </view>
 
     <view class="card">
@@ -52,7 +61,9 @@
       <button class="primary" disabled="{{!canBid || submitting}}" bindtap="submitBid">
         {{submitting ? "提交中" : bidButtonText}}
       </button>
+      <button class="secondary" bindtap="refreshNow">刷新专场数据</button>
       <text class="hint">{{hint}}</text>
+      <text class="hint">{{debugText}}</text>
     </view>
 
     <view wx:if="{{snapshot.order}}" class="card">
@@ -69,7 +80,7 @@
     <view class="card">
       <view class="bid-head">
         <text class="section-title">实时记录</text>
-        <text class="muted">{{snapshot.participantCount}} 人参与</text>
+        <text class="muted">{{snapshot.participantCount}} 人参与 / {{liveRoomId}}</text>
       </view>
       <view wx:if="{{snapshot.bids.length === 0}}" class="muted">暂无记录</view>
       <view wx:for="{{snapshot.bids}}" wx:key="id" class="bid-row">

@@ -10,14 +10,26 @@ Page({
   },
 
   async onLoad(options) {
-    this.setData({ liveRoomId: options.liveRoomId || "" });
-    await getApp().ensureLogin();
-    await this.load();
+    this.setData({ liveRoomId: options.liveRoomId || "", loading: true, error: "" });
+
+    try {
+      await getApp().ensureLogin();
+      await this.load();
+    } catch (error) {
+      this.setData({
+        loading: false,
+        error: error.message || "订单加载失败"
+      });
+    }
   },
 
   async onShow() {
     if (!this.data.loading) {
-      await this.load();
+      try {
+        await this.load();
+      } catch (error) {
+        this.setData({ error: error.message || "订单加载失败" });
+      }
     }
   },
 

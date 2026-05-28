@@ -1,4 +1,13 @@
-const DEFAULT_API_BASE_URL = "http://localhost:4200";
+const API_BASE_URL_CANDIDATES = [
+  "http://localhost:4300",
+  "http://127.0.0.1:4300"
+];
+const DEFAULT_API_BASE_URL = API_BASE_URL_CANDIDATES[0];
+const REQUEST_TIMEOUT_MS = 10000;
+const FALLBACK_STATUS_CODES = [502, 503, 504];
+const IGNORED_API_BASE_URLS = [
+  "http://172.29.96.253:4300"
+];
 
 function getAppConfig() {
   const app = getApp();
@@ -6,11 +15,65 @@ function getAppConfig() {
 }
 
 function getApiBaseUrl() {
-  return getAppConfig().apiBaseUrl || DEFAULT_API_BASE_URL;
+  return normalizeBaseUrl(getAppConfig().apiBaseUrl || DEFAULT_API_BASE_URL);
+}
+
+function getDefaultApiBaseUrl() {
+  return DEFAULT_API_BASE_URL;
+}
+
+function getApiBaseUrlCandidates() {
+  const current = getApiBaseUrl();
+  const candidates = [...API_BASE_URL_CANDIDATES, current].map(normalizeBaseUrl);
+  return candidates.filter((candidate, index) => candidates.indexOf(candidate) === index);
+}
+
+function setApiBaseUrl(apiBaseUrl) {
+  const normalized = normalizeBaseUrl(apiBaseUrl || DEFAULT_API_BASE_URL);
+  const appConfig = getAppConfig();
+  appConfig.apiBaseUrl = normalized;
+  return normalized;
+}
+
+function normalizeBaseUrl(apiBaseUrl) {
+  const normalized = String(apiBaseUrl || DEFAULT_API_BASE_URL).replace(/\/+$/, "");
+  return IGNORED_API_BASE_URLS.includes(normalized) ? DEFAULT_API_BASE_URL : normalized;
+}
+
+function getErrorMessage(error) {
+  if (!error) {
+    return "未知错误";
+  }
+
+  if (typeof error === "string") {
+    return error;
+  }
+
+  return error.message || error.errMsg || "未知错误";
+}
+
+function getResponseMessage(data) {
+  if (!data) {
+    return "请求失败";
+  }
+
+  if (typeof data === "string") {
+    return data.slice(0, 80) || "请求失败";
+  }
+
+  return data.message || "请求失败";
+}
+
+function shouldTryNextBaseUrl(statusCode, index, baseUrls) {
+  return FALLBACK_STATUS_CODES.includes(statusCode) && index < baseUrls.length - 1;
 }
 
 function request(path, options = {}) {
-  const token = options.token || getAppConfig().token || wx.getStorageSync("auction_token");
+  const baseUrls = getApiBaseUrlCandidates();
+  const shouldAttachToken = options.token !== "";
+  const token = shouldAttachToken
+    ? options.token || getAppConfig().token || wx.getStorageSync("auction_token")
+    : "";
   const headers = {
     "Content-Type": "application/json",
     ...(options.header || {})
@@ -20,26 +83,57 @@ function request(path, options = {}) {
     headers.Authorization = `Bearer ${token}`;
   }
 
+  return requestWithFallback(baseUrls, path, options, headers);
+}
+
+function requestWithFallback(baseUrls, path, options, headers) {
+  let index = 0;
+  let lastError = null;
+
   return new Promise((resolve, reject) => {
-    wx.request({
-      url: `${getApiBaseUrl()}${path}`,
-      method: options.method || "GET",
-      data: options.data || {},
-      header: headers,
-      success(res) {
-        const data = res.data || {};
+    const tryNext = () => {
+      const baseUrl = baseUrls[index];
 
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          resolve(data);
-          return;
-        }
-
-        reject(new Error(data.message || "请求失败"));
-      },
-      fail(error) {
-        reject(new Error(error.errMsg || "网络连接失败"));
+      if (!baseUrl) {
+        reject(lastError || new Error("网络连接失败"));
+        return;
       }
-    });
+
+      wx.request({
+        url: `${baseUrl}${path}`,
+        method: options.method || "GET",
+        data: options.data || {},
+        header: headers,
+        timeout: options.timeout || REQUEST_TIMEOUT_MS,
+        success(res) {
+          const data = res.data || {};
+
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            setApiBaseUrl(baseUrl);
+            resolve(data);
+            return;
+          }
+
+          const message = getResponseMessage(data);
+
+          if (shouldTryNextBaseUrl(res.statusCode, index, baseUrls)) {
+            lastError = new Error(`${message} (${res.statusCode}, ${baseUrl})`);
+            index += 1;
+            tryNext();
+            return;
+          }
+
+          reject(new Error(`${message} (${res.statusCode}, ${baseUrl})`));
+        },
+        fail(error) {
+          lastError = new Error(`${getErrorMessage(error)}，已尝试 ${baseUrl}`);
+          index += 1;
+          tryNext();
+        }
+      });
+    };
+
+    tryNext();
   });
 }
 
@@ -60,6 +154,10 @@ function loginDemo(input = {}) {
     },
     token: ""
   });
+}
+
+function getMe() {
+  return request("/api/me");
 }
 
 function getLiveRooms() {
@@ -94,11 +192,16 @@ function payOrder(orderId) {
 
 module.exports = {
   getAuctionSnapshot,
+  getApiBaseUrl,
+  getApiBaseUrlCandidates,
+  getDefaultApiBaseUrl,
+  getMe,
   getLiveRoom,
   getLiveRooms,
   getMyOrders,
   loginDemo,
   payOrder,
   placeBid,
-  request
+  request,
+  setApiBaseUrl
 };
