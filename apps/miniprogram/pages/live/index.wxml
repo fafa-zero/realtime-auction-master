@@ -7,7 +7,7 @@
       <image wx:if="{{snapshot.product.imageUrl}}" src="{{snapshot.product.imageUrl}}" mode="aspectFill" />
       <view wx:else class="stage-placeholder">模拟直播画面</view>
       <view class="stage-overlay">
-        <text class="live-badge">ON</text>
+        <text class="live-badge">{{liveBadgeText}}</text>
         <text class="stage-title">{{room.title}}</text>
         <text class="stage-meta">{{room.hostName}} / {{room.viewerCount}} 人浏览</text>
         <text class="realtime">{{realtimeText}}</text>

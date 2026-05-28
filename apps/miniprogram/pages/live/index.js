@@ -18,6 +18,14 @@ const statusMap = {
   CANCELLED: "已取消"
 };
 
+const badgeMap = {
+  PENDING: "待开始",
+  ACTIVE: "ON",
+  SOLD: "已成交",
+  UNSOLD: "已结束",
+  CANCELLED: "已取消"
+};
+
 const fallbackRoom = {
   id: "live-1",
   title: "珠宝严选竞拍直播间",
@@ -41,13 +49,13 @@ const fallbackSnapshot = {
     incrementStep: 100,
     ceilingPrice: 3000,
     durationSeconds: 600,
-    startTime: Date.now(),
-    endTime: Date.now() + 600000,
+    startTime: null,
+    endTime: null,
     extendThresholdSeconds: 10,
     extendSeconds: 20,
     maxExtendCount: 3,
     extendCount: 0,
-    status: "ACTIVE",
+    status: "PENDING",
     winnerUserId: null,
     winnerNickname: null,
     version: 1
@@ -74,6 +82,7 @@ Page({
     ceilingText: "¥0",
     orderPriceText: "¥0",
     statusText: "待开始",
+    liveBadgeText: "待开始",
     leaderText: "暂无领先用户",
     bidCountText: "0 条记录",
     bidButtonText: "参与",
@@ -196,6 +205,7 @@ Page({
       ceilingText: money(snapshot.auction.ceilingPrice),
       orderPriceText: snapshot.order ? money(snapshot.order.finalPrice) : "¥0",
       statusText: statusMap[snapshot.auction.status] || snapshot.auction.status,
+      liveBadgeText: badgeMap[snapshot.auction.status] || snapshot.auction.status,
       leaderText: snapshot.auction.winnerNickname || "暂无领先用户",
       bidCountText: `${bids.length} 条记录`
     });
