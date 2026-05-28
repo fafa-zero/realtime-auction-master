@@ -207,14 +207,8 @@ Page({
       return "";
     }
 
-    const localImages = {
-      "product-1": "/static/jewelry.jpg",
-      "product-2": "/static/watch.jpg"
-    };
-    const localImage = localImages[product.id];
-
-    if (localImage) {
-      return this.resolveAssetUrl(localImage);
+    if (product.imageUrl.startsWith("/static/")) {
+      return "";
     }
 
     return this.resolveAssetUrl(product.imageUrl);
