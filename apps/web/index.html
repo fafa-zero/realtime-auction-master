@@ -6,6 +6,28 @@
     <title>实时竞拍大师</title>
   </head>
   <body>
+    <div
+      id="boot-fallback"
+      style="
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        color: #111111;
+        background: #ffeb3b;
+        font: 700 24px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        text-align: center;
+      "
+    >
+      <div>
+        <div>实时竞拍大师正在加载</div>
+        <div style="margin-top: 12px; font-size: 16px; font-weight: 500">
+          如果长时间停留在这里，请刷新页面或确认本地服务已启动。
+        </div>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

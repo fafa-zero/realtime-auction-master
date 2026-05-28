@@ -24,7 +24,7 @@ import {
 import { io, type Socket } from "socket.io-client";
 import type { AuctionHistoryItem, AuctionSnapshot, AuctionStatus, LiveRoom, Order } from "./types";
 
-const API_URL = import.meta.env.VITE_API_URL ?? "";
+const API_URL = resolveApiUrl(import.meta.env.VITE_API_URL);
 const DEFAULT_LIVE_ROOM_ID = "live-1";
 
 const statusText = {
@@ -59,8 +59,8 @@ type ViewMode = "host" | "buyer";
 type AppRoute = {
   viewMode: ViewMode;
   liveRoomId: string;
+  home?: boolean;
   notFound?: boolean;
-  redirectTo?: string;
 };
 
 const aiTaskText: Record<AiTask, string> = {
@@ -74,6 +74,29 @@ const demoBidders = [
   { userId: "demo-user-b", nickname: "演示用户B", stepMultiplier: 2 },
   { userId: "demo-user-c", nickname: "演示用户C", stepMultiplier: 3 }
 ];
+
+function resolveApiUrl(configuredApiUrl?: string) {
+  const value = configuredApiUrl?.trim();
+
+  if (!value) {
+    return "";
+  }
+
+  try {
+    const apiUrl = new URL(value, window.location.origin);
+    const pageHost = window.location.hostname;
+    const isPageLocal = pageHost === "localhost" || pageHost === "127.0.0.1";
+    const isApiLocal = apiUrl.hostname === "localhost" || apiUrl.hostname === "127.0.0.1";
+
+    if (!isPageLocal && isApiLocal) {
+      return "";
+    }
+
+    return apiUrl.toString().replace(/\/$/, "");
+  } catch {
+    return value;
+  }
+}
 
 export function App() {
   const [route, setRoute] = useState<AppRoute>(() => parseRoute(getCurrentPath()));
@@ -108,16 +131,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!route.redirectTo) {
-      return;
-    }
-
-    window.history.replaceState(null, "", route.redirectTo);
-    setRoute(parseRoute(route.redirectTo));
-  }, [route.redirectTo]);
-
-  useEffect(() => {
-    if (route.notFound) {
+    if (route.notFound || route.home) {
       return;
     }
 
@@ -252,7 +266,7 @@ export function App() {
       cancelled = true;
       socket.disconnect();
     };
-  }, [liveRoomId, route.notFound]);
+  }, [liveRoomId, route.home, route.notFound]);
 
   useEffect(() => {
     fetch(`${API_URL}/api/live-rooms`)
@@ -269,12 +283,12 @@ export function App() {
   }, []);
 
   const remaining = useMemo(() => {
-    if (!snapshot?.auction.endTime) {
+    if (!snapshot?.auction.endTime || snapshot.auction.status !== "ACTIVE") {
       return 0;
     }
 
     return Math.max(0, snapshot.auction.endTime - (now + serverOffset));
-  }, [now, serverOffset, snapshot?.auction.endTime]);
+  }, [now, serverOffset, snapshot?.auction.endTime, snapshot?.auction.status]);
 
   const nextBid = snapshot ? snapshot.auction.currentPrice + snapshot.auction.incrementStep : 0;
   const bidAmount = Number(bidPrice);
@@ -550,6 +564,16 @@ export function App() {
     } catch {
       // Archive panels are secondary; keep the live auction usable if history fetch fails.
     }
+  }
+
+  if (route.home) {
+    return (
+      <HomeRoute
+        liveRoomId={liveRooms[0]?.id ?? DEFAULT_LIVE_ROOM_ID}
+        onGoHost={() => navigateTo("/host", setRoute)}
+        onGoLive={(targetLiveRoomId) => navigateTo(`/live/${targetLiveRoomId}`, setRoute)}
+      />
+    );
   }
 
   if (route.notFound || loadError) {
@@ -1027,6 +1051,30 @@ function RouteError(props: {
   );
 }
 
+function HomeRoute(props: {
+  liveRoomId: string;
+  onGoHost: () => void;
+  onGoLive: (liveRoomId: string) => void;
+}) {
+  return (
+    <main className="route-error route-home">
+      <div>
+        <Radio size={28} />
+        <p className="eyebrow">实时竞拍大师</p>
+        <h1>选择演示入口</h1>
+        <p>根路径不直接展示拍卖界面，请从主播端或观众预览入口进入。</p>
+        <div className="route-error-actions">
+          <button onClick={props.onGoHost}>进入主播端</button>
+          <button className="primary-button" onClick={() => props.onGoLive(props.liveRoomId)}>
+            打开观众预览
+          </button>
+        </div>
+        <p className="route-hint">可直接访问 /host 或 /live/{props.liveRoomId}</p>
+      </div>
+    </main>
+  );
+}
+
 function parseRoute(pathname: string): AppRoute {
   const url = new URL(pathname, window.location.origin);
   const cleanPath = url.pathname.replace(/\/+$/, "") || "/";
@@ -1036,7 +1084,7 @@ function parseRoute(pathname: string): AppRoute {
     return {
       viewMode: "buyer",
       liveRoomId: DEFAULT_LIVE_ROOM_ID,
-      redirectTo: `/live/${DEFAULT_LIVE_ROOM_ID}`
+      home: true
     };
   }
 
