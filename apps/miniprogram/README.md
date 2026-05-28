@@ -11,28 +11,25 @@
 
 ## 本地联调
 
-1. 启动 Web + API：
+1. 启动稳定单端口服务：
 
 ```bash
-npm run dev
-```
-
-如果默认端口被占用，可以使用当前开发环境约定：
-
-```bash
-PORT=4200 CLIENT_URL=http://localhost:5174 VITE_API_URL=http://localhost:4200 npm run dev
+npm --workspace apps/web run build
+env PORT=4300 CLIENT_URL=http://localhost:4300 npm --workspace apps/server run dev
 ```
 
 2. 用微信开发者工具打开 `apps/miniprogram`。
 
-3. 当前 `app.js` 默认 API 地址是：
+3. 当前小程序会按顺序尝试多个本地 API 地址，避免微信开发者工具访问某一个地址时被 Windows 代理或 WSL 转发拦截：
 
 ```text
-http://localhost:4200
-ws://localhost:4200/miniprogram-ws
+http://localhost:4300
+http://127.0.0.1:4300
 ```
 
-如需改端口，修改 `app.js` 里的 `globalData.apiBaseUrl` 和 `globalData.wsUrl`。
+Web 页面和小程序必须连到同一个 `4300` 后端实例，才能共享同一套拍卖状态。Web 页面可以继续打开 `http://localhost:4300/host?liveRoomId=live-1`，小程序会自动使用能访问到该服务的本地地址。
+
+不能一边连 `4200`，另一边连 `4300`。
 
 4. 开发者工具里需要开启“不校验合法域名、web-view、TLS 版本以及 HTTPS 证书”。
 
@@ -42,8 +39,7 @@ ws://localhost:4200/miniprogram-ws
 - `pages/live/index`：专场详情、商品画面、实时快照、参与金额、确认后模拟支付。
 - `pages/orders/index`：我的订单。
 - 登录使用 `/api/auth/miniprogram/login` 的 `mockCode` 演示模式。
-- 实时同步优先使用小程序原生 `wx.connectSocket`，消息格式为 JSON `type + payload`。
-- WebSocket 断开时详情页会临时降级为 REST 轮询。
+- 详情页使用 REST 轮询同步，出价也走 HTTP 接口，避免微信开发者工具 WebSocket timeout 阻断演示。
 
 ## 生产边界
 

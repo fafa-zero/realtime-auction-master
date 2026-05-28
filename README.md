@@ -52,18 +52,26 @@ npm install
 npm run dev
 ```
 
-默认地址：
+默认开发地址：
 
-- Web 主播端：http://localhost:5173/host
-- Web 观众预览页：http://localhost:5173/live/live-1
-- 后端：http://localhost:4000
+- Web 主播端：http://localhost:5174/host
+- Web 观众预览页：http://localhost:5174/live/live-1
+- 后端：http://localhost:4200
 
-如果 5173 被占用，Vite 会自动切到 5174 等下一个端口。
+如果 WSL 的 `localhost:5173/5174` 转发不稳定，使用单端口稳定模式：
+
+1. 构建前端：`npm --workspace apps/web run build`
+2. 启动服务：`PORT=4300 CLIENT_URL=http://localhost:4300 npm --workspace apps/server run dev`
+3. 在 Windows 浏览器打开：
+   `http://localhost:4300/host`
+   `http://localhost:4300/live/live-1`
+
+稳定模式会由 Express 直接托管前端页面、API、Socket.IO 和本地静态图片，只保留一个端口，适合演示环境。
 
 小程序：
 
 - 用微信开发者工具打开 `apps/miniprogram`。
-- 默认 API 地址写在 `apps/miniprogram/app.js`，当前为 `http://localhost:4200`。
+- 默认 API 地址写在 `apps/miniprogram/utils/api.js`，当前会尝试 `http://localhost:4300` 和 `http://127.0.0.1:4300`；它和 Web 主播页 `http://localhost:4300/host?liveRoomId=live-1` 指向同一个后端实例。
 - 本地联调说明见 `apps/miniprogram/README.md`。
 
 ## 环境变量
@@ -71,8 +79,8 @@ npm run dev
 后端：
 
 ```bash
-PORT=4000
-CLIENT_URL=http://localhost:5173
+PORT=4200
+CLIENT_URL=http://localhost:5174
 AUCTION_DATA_FILE=data/auction-state.json
 ```
 
