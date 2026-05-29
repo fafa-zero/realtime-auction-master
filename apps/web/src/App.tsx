@@ -1516,8 +1516,8 @@ function LoginRoute(props: {
     <main className="route-error login-route">
       <div>
         <UserCheck size={28} />
-        <p className="eyebrow">商家登录</p>
-        <h1>{isRegister ? "注册演示账号" : "进入竞拍控制台"}</h1>
+        <p className="eyebrow">账号入口</p>
+        <h1>{isRegister ? "注册演示账号" : "登录演示账号"}</h1>
         <p>{props.message}</p>
         <div className="auth-tabs" role="tablist" aria-label="账号操作">
           <button
@@ -1583,11 +1583,11 @@ function LoginRoute(props: {
         <div className="login-actions">
           <button onClick={() => props.onDemoLogin("HOST")}>
             <Radio size={16} />
-            商家/主播登录
+            使用商家演示账号
           </button>
           <button onClick={() => props.onDemoLogin("BUYER")}>
             <Users size={16} />
-            买家预览登录
+            使用买家演示账号
           </button>
         </div>
         <button className="link-button" onClick={props.onGoLive}>
