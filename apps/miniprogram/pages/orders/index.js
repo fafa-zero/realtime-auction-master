@@ -20,6 +20,7 @@ Page({
         loading: false,
         error: error.message || "订单加载失败"
       });
+      wx.redirectTo({ url: "/pages/index/index" });
     }
   },
 

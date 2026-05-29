@@ -29,17 +29,35 @@ Page({
 
   async onShow() {
     const app = getApp();
+    const storedNickname = wx.getStorageSync("auction_nickname") || app.globalData.user?.nickname || "演示买家";
+
     this.setData({
       loading: false,
       error: "",
-      loggedIn: Boolean(app.globalData.token && app.globalData.user),
-      nickname: wx.getStorageSync("auction_nickname") || app.globalData.user?.nickname || "演示买家",
-      userText: app.globalData.user ? `当前用户：${app.globalData.user.nickname}` : "请先登录后进入专场"
+      nickname: storedNickname
     });
 
     if (app.globalData.token && app.globalData.user) {
-      this.load();
+      try {
+        await app.ensureLogin();
+        this.setData({
+          loggedIn: true,
+          userText: `当前用户：${app.globalData.user.nickname}`
+        });
+        this.load();
+      } catch {
+        this.setData({
+          loggedIn: false,
+          userText: "请先登录后进入专场"
+        });
+      }
+      return;
     }
+
+    this.setData({
+      loggedIn: false,
+      userText: "请先登录后进入专场"
+    });
   },
 
   onNicknameInput(event) {

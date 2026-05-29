@@ -34,6 +34,8 @@ App({
       } catch {
         this.globalData.token = "";
         this.globalData.user = null;
+        wx.removeStorageSync("auction_token");
+        wx.removeStorageSync("auction_user");
       }
     }
 
@@ -55,9 +57,7 @@ App({
       }
     }
 
-    await this.loginDemoUser();
-
-    return this.globalData;
+    throw new Error("请先登录后进入专场");
   },
 
   async loginDemoUser(input = {}) {

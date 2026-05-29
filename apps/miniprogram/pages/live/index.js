@@ -106,9 +106,15 @@ Page({
   },
 
   onShow() {
-    this.ensurePageLogin().then(() => this.load());
-    this.clockTimer = setInterval(() => this.refreshComputed(), 500);
-    this.pollingTimer = setInterval(() => this.loadSnapshot(), POLLING_INTERVAL_MS);
+    this.ensurePageLogin()
+      .then(() => {
+        this.load();
+        this.clockTimer = setInterval(() => this.refreshComputed(), 500);
+        this.pollingTimer = setInterval(() => this.loadSnapshot(), POLLING_INTERVAL_MS);
+      })
+      .catch(() => {
+        this.closeRealtime();
+      });
   },
 
   onHide() {
