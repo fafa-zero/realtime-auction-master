@@ -93,8 +93,10 @@ WECHAT_MINIPROGRAM_SECRET=
 前端：
 
 ```bash
-VITE_API_URL=http://localhost:4000
+VITE_API_URL=http://localhost:4200
 ```
+
+稳定单端口演示模式由后端托管 Web 静态文件，不需要单独配置 `VITE_API_URL`。
 
 ## AI 配置
 
@@ -142,6 +144,8 @@ AI_MODEL=your_model_name
 - `GET /api/live-rooms`：获取直播间列表。
 - `GET /api/live-rooms/default`：获取默认模拟直播间信息，包括主播、直播流地址和当前竞拍 ID。
 - `GET /api/live-rooms/:liveRoomId/auction`：获取指定直播间竞拍快照。
+- `POST /api/live-rooms/:liveRoomId/products/import`：导入固定模板商品表，示例文件为 `docs/product-import-template.csv`。
+- `POST /api/live-rooms/:liveRoomId/products/:productId/start`：从商品队列选择指定商品开始竞拍。
 - `GET /api/auction`：获取竞拍快照。
 - `GET /api/auction/history`：获取最近竞拍历史，用于观众“我的竞拍”和演示复盘。
 - `GET /api/orders`：获取内存中的订单列表，用于主播端订单管理。
@@ -177,14 +181,15 @@ Socket.IO 事件：
 ## 演示流程
 
 1. 打开前端页面。
-2. 访问 `/host`，选择直播间并配置竞拍时长、最低加价、封顶价。
-3. 访问 `/live/live-1` 或 `/live/live-2` 打开 Web 观众预览页。
-4. 主播端点击“开始/重开竞拍”，或使用演示出价工具模拟多人出价。
-5. Web 观众预览页或小程序直播页提交出价，观察当前最高价和出价记录实时变化。
-6. 在倒计时最后 10 秒内出价，观察自动延时。
-7. 出价达到封顶价，观察自动成交和订单生成。
-8. 点击“模拟支付”，观察订单状态变为已支付。
-9. 主播端点击 AI 竞拍助手按钮，生成讲解词、竞拍复盘或异常出价提示。
+2. 访问 `/host`，登录商家/主播账号。
+3. 在“商品导入”上传 `docs/product-import-template.csv`，刷新并查看商品队列。
+4. 从商品队列选择商品开始竞拍。
+5. 小程序先注册买家，再登录进入直播间；也可以访问 `/live/live-1` 打开 Web 观众预览页。
+6. Web 观众预览页或小程序直播页提交出价，观察当前最高价和出价记录实时变化。
+7. 在倒计时最后 10 秒内出价，观察自动延时。
+8. 出价达到封顶价，观察自动成交和订单生成。
+9. 点击“模拟支付”，观察订单状态变为已支付。
+10. 主播端点击 AI 竞拍助手按钮，生成讲解词、竞拍复盘或异常出价提示。
 
 ## Git 提交规则
 

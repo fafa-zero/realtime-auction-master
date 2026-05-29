@@ -1153,7 +1153,7 @@ export function App() {
                 </button>
               </div>
               <p className="muted template-hint">
-                表头：商品名称、商品描述、起拍价、最低加价、封顶价、竞拍时长秒、库存、商品卖点、讲解关键词。
+                可上传 docs/product-import-template.csv；表头：商品名称、商品描述、起拍价、最低加价、封顶价、竞拍时长秒、库存、商品卖点、讲解关键词。
               </p>
               {importResult ? (
                 <div className="import-result">

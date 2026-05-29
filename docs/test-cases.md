@@ -2,17 +2,17 @@
 
 ## 测试范围
 
-本文档用于最终 Demo 前的手工测试记录，覆盖“Web 主播端开拍 → Web 观众预览 → 小程序演示登录 → 小程序 WebSocket 出价 → 多直播间隔离 → 生成订单 → 我的订单 → 支付权限校验 → AI 助手”的核心流程。
+本文档用于最终 Demo 前的手工测试记录，覆盖“Web 主播端开拍 → Web 观众预览 → 小程序注册/微信登录 → 小程序 REST 出价 → 多直播间隔离 → 生成订单 → 我的订单 → 支付权限校验 → AI 助手”的核心流程。
 
 ## 测试环境
 
 | 项目 | 内容 |
 | --- | --- |
-| Web 前端 | React + Vite，默认 `http://localhost:5173`；端口占用时可能为 `http://localhost:5174` |
-| 后端 | Express + Socket.IO + 原生 WebSocket，默认 `http://localhost:4000`；本地演示常用 `http://localhost:4200` |
+| Web 前端 | React + Vite，默认 `http://localhost:5174`；稳定演示推荐由后端托管在 `http://localhost:4300` |
+| 后端 | Express + Socket.IO + 原生 WebSocket，本地演示推荐 `http://localhost:4300` |
 | 小程序 | 微信开发者工具打开 `apps/miniprogram` |
-| 小程序 API | `http://localhost:4200`，配置位置 `apps/miniprogram/app.js` |
-| 小程序 WebSocket | `ws://localhost:4200/miniprogram-ws` |
+| 小程序 API | 默认尝试 `http://localhost:4300` 和 `http://127.0.0.1:4300`，配置位置 `apps/miniprogram/utils/api.js` |
+| 小程序同步 | 当前小程序详情页使用 REST 轮询和 HTTP 出价，避免开发者工具 WebSocket timeout 影响演示 |
 | 存储 | 本地 JSON 文件，默认 `apps/server/data/auction-state.json` |
 | 浏览器 | Chrome / Edge |
 | 微信开发者工具 | 本地联调时开启“不校验合法域名、web-view、TLS 版本以及 HTTPS 证书” |
@@ -56,18 +56,19 @@
 | ROOM-04 | Socket.IO room 隔离 | 打开 `/live/live-1` 和 `/live/live-2`，只在 `live-1` 出价 | `live-1` 页面更新，`live-2` 页面不显示 `live-1` 出价 | 待执行 |
 | ROOM-05 | 订单隔离 | `live-2` 封顶成交后分别调用 `/api/live-rooms/live-1/orders` 和 `/api/live-rooms/live-2/orders` | `live-2` 返回新订单，`live-1` 不出现该订单 | 待执行 |
 
-## 小程序登录与 WebSocket 用例
+## 小程序登录与出价用例
 
 | 编号 | 场景 | 操作步骤 | 预期结果 | 状态 |
 | --- | --- | --- | --- | --- |
-| MP-01 | 小程序演示登录 | 调用 `POST /api/auth/miniprogram/login`，入参包含 `mockCode` 和 `nickname` | 返回 `ok: true`、`token`、`expiresAt` 和用户信息 | 待执行 |
-| MP-02 | 查询当前用户 | 使用 `Authorization: Bearer <token>` 调用 `GET /api/me` | 返回与登录一致的用户昵称和 `role: BUYER` | 待执行 |
-| MP-03 | 小程序直播间列表 | 微信开发者工具打开小程序首页 | 页面完成演示登录，并显示 `live-1`、`live-2` 直播间 | 待执行 |
-| MP-04 | 小程序进入直播间 | 点击 `live-1` 直播间 | 页面展示模拟直播画面、商品、当前价、倒计时和出价记录 | 待执行 |
-| MP-05 | WebSocket 连接 | 小程序进入直播间后观察页面实时状态文本 | 显示“实时已连接”或“实时同步中”，后端接受 `auction:join` | 待执行 |
-| MP-06 | 小程序 WebSocket 出价 | Web 主播端开拍后，小程序输入合法价格并出价 | 小程序通过 `wx.connectSocket` 发送 `auction:bid`，收到 `auction:bid-success` 后页面价格更新 | 待执行 |
-| MP-07 | Web + 小程序同步 | Web 观众预览页出价后观察小程序；小程序出价后观察 Web 预览页 | 两端均能收到同一直播间最新竞拍快照 | 待执行 |
-| MP-08 | WebSocket 断开兜底 | 临时断开 WebSocket 或关闭后端再恢复 | 小程序显示断开提示，并降级为 REST 轮询获取快照 | 待执行 |
+| MP-01 | 未注册直接登录 | 小程序首页保持“登录”，输入昵称后点击“登录进入专场” | 提示“买家账号不存在，请先注册”，不展示直播间列表 | 待执行 |
+| MP-02 | 买家注册 | 切换“注册”，输入昵称后点击“注册买家账号” | 返回注册成功提示，不自动进入专场 | 待执行 |
+| MP-03 | 买家登录 | 注册后切回“登录”，点击“登录进入专场” | 返回 `token`、`expiresAt` 和用户信息，显示 `live-1`、`live-2` 直播间 | 待执行 |
+| MP-04 | 查询当前用户 | 使用 `Authorization: Bearer <token>` 调用 `GET /api/me` | 返回与登录一致的用户昵称和 `role: BUYER` | 待执行 |
+| MP-05 | 小程序进入直播间 | 点击 `live-1` 直播间 | 页面展示模拟直播画面、商品、当前价、倒计时和出价记录 | 待执行 |
+| MP-06 | REST 轮询同步 | 小程序进入直播间后观察页面实时状态文本 | 显示轮询同步状态，价格和倒计时持续刷新 | 待执行 |
+| MP-07 | 小程序 HTTP 出价 | Web 主播端开拍后，小程序输入合法价格并出价 | 小程序通过 HTTP 提交出价，成功后页面价格更新 | 待执行 |
+| MP-08 | Web + 小程序同步 | Web 观众预览页出价后观察小程序；小程序出价后观察 Web 预览页 | 两端均能收到同一直播间最新竞拍快照 | 待执行 |
+| MP-09 | 取消登录 | 小程序首页或直播页点击“取消登录” | 清除 token，返回登录入口，直播页不再展示专场内容 | 待执行 |
 
 ## 我的订单与支付权限用例
 
@@ -92,8 +93,8 @@
 | EDGE-06 | 主播取消 | `ACTIVE` 状态点击取消竞拍 | 状态变为 `CANCELLED`，后续出价被拒绝 | 待执行 |
 | EDGE-07 | 重复支付 | 已支付订单再次调用支付接口 | 返回已支付订单，不生成新订单 | 待执行 |
 | EDGE-08 | 错误订单支付 | 使用不存在的订单 ID 调用支付接口 | 返回错误提示“订单不存在” | 待执行 |
-| EDGE-09 | 小程序缺少 token 出价 | 小程序 WebSocket 出价消息不带 `token` | 返回 `auction:error`，提示登录失效或 token 缺失 | 待执行 |
-| EDGE-10 | 小程序加入不存在直播间 | WebSocket 发送 `auction:join`，`liveRoomId` 为不存在的值 | 返回 `auction:error`，提示直播间不存在 | 待执行 |
+| EDGE-09 | 小程序缺少 token 出价 | 小程序 HTTP 出价请求不带 `token` | 返回 401，提示登录失效或 token 缺失 | 待执行 |
+| EDGE-10 | 小程序进入不存在直播间 | 打开 `pages/live/index?liveRoomId=missing-room` | 接口返回错误提示，页面不展示有效竞拍数据 | 待执行 |
 
 ## AI 助手用例
 
@@ -116,12 +117,12 @@
 | DOC-04 | 链接材料 | 在线 Demo、演示视频、源代码仓库链接已填写 | 待填写 |
 | DOC-05 | 实测结果 | 性能指标、用户反馈、最终提交 hash 已填写 | 待填写 |
 | DOC-06 | Git 提交规则 | README 包含“一个小功能一个 commit”、typecheck/build 和 commit 前缀规则 | 待确认 |
-| DOC-07 | 小程序联调说明 | `apps/miniprogram/README.md` 包含 request / WebSocket 本地地址和开发者工具设置 | 待确认 |
+| DOC-07 | 小程序联调说明 | `apps/miniprogram/README.md` 包含 request 本地地址、微信登录配置和开发者工具设置 | 待确认 |
 
 ## 已知边界
 
 - 当前使用本地 JSON 文件持久化，适合单机演示；生产环境应替换为数据库。
 - 当前支付为模拟支付，不接入真实支付网关。
-- 当前小程序登录使用 `mockCode` 演示模式，真实上线需要接 `wx.login` 和 `code2Session`。
+- 当前小程序优先使用 `wx.login`；未配置微信 AppID/Secret 时会回落到稳定演示身份。
 - 当前直播流为模拟画面，不接入真实推流 / 拉流服务。
 - 当前单机 Node.js 进程适合演示业务闭环；生产级高并发竞价需要 Redis 原子操作、消息队列、数据库事务和多实例 WebSocket 广播等扩展。

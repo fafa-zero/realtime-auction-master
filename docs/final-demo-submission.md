@@ -84,26 +84,30 @@
 cd /home/zyy/realtime-auction-master
 npm install
 npm run typecheck
-npm run build
-npm run dev
+npm --workspace apps/web run build
+env PORT=4300 CLIENT_URL=http://localhost:4300 npm --workspace apps/server run dev
 ```
 
 默认访问：
 
 ```text
-前端：http://localhost:5173
-后端：http://localhost:4000
+主播端：http://localhost:4300/host?liveRoomId=live-1
+Web 观众预览：http://localhost:4300/live/live-1
+小程序：微信开发者工具打开 apps/miniprogram
+后端：http://localhost:4300
 ```
 
-建议打开两个浏览器窗口，模拟“主播/运营”和“竞拍用户”：
+建议同时打开 Web 主播端、Web 观众预览页和微信开发者工具：
 
-1. 两个窗口同时打开前端页面，确认右上角显示实时连接。
-2. 主播窗口点击“开始/重开竞拍”，两个窗口应同步显示竞拍中、倒计时开始、当前价回到起拍价。
-3. 用户窗口修改昵称并出价，例如 100 元、200 元，主播窗口应实时看到最高价和出价记录更新。
-4. 在倒计时最后 10 秒内出价，页面应显示自动延时，延时次数增加。
-5. 出价到 3000 元封顶价，竞拍应立即变为已成交，并生成待支付订单。
-6. 点击“模拟支付”，订单状态应变为已支付，多个窗口同步更新。
-7. 分别点击 AI 商品讲解词、AI 竞拍复盘、异常出价提示，确认未配置模型 API 时也能返回本地兜底内容。
+1. 主播端登录商家账号，例如 `demo-host / demo123`。
+2. 在“商品导入”上传 `docs/product-import-template.csv`，确认商品队列出现导入商品。
+3. 选择队列中的商品开始竞拍，Web 观众预览页应同步显示竞拍中。
+4. 小程序首页先注册买家，再登录进入 `live-1` 专场。
+5. 小程序或 Web 观众预览页提交出价，例如 150 元、180 元，主播端应实时看到最高价和出价记录更新。
+6. 在倒计时最后 10 秒内出价，页面应显示自动延时，延时次数增加。
+7. 出价达到商品封顶价，竞拍应立即变为已成交，并生成待支付订单。
+8. 点击“模拟支付”，订单状态应变为已支付，多个窗口同步更新。
+9. 分别点击 AI 商品讲解词、AI 竞拍复盘、异常出价提示，确认未配置模型 API 时也能返回本地兜底内容。
 
 演示时重点说明：当前项目是“模拟直播电商场景的实时竞拍 MVP”，不是完整抖音电商平台；真实抖音接入、真实支付、Redis 高并发和数据库持久化属于后续扩展。
 
@@ -116,7 +120,8 @@ npm run dev
 ```text
 前端地址：待填写
 后端地址：待填写
-体验账号：无需登录
+商家体验账号：demo-host / demo123
+买家体验账号：小程序首页先注册，再登录
 ```
 
 如果暂时无法提供公网 Demo，可提供录屏链接作为替代：
@@ -202,14 +207,16 @@ npm install
 启动前后端：
 
 ```bash
-npm run dev
+npm --workspace apps/web run build
+env PORT=4300 CLIENT_URL=http://localhost:4300 npm --workspace apps/server run dev
 ```
 
 默认访问地址：
 
 ```text
-前端：http://localhost:5173
-后端：http://localhost:4000
+主播端：http://localhost:4300/host?liveRoomId=live-1
+Web 观众预览：http://localhost:4300/live/live-1
+后端：http://localhost:4300
 ```
 
 ### 9.4 目录结构
@@ -239,19 +246,19 @@ realtime-auction-master
 后端端口：
 
 ```text
-PORT=4000
+PORT=4300
 ```
 
 前端允许访问地址：
 
 ```text
-CLIENT_URL=http://localhost:5173
+CLIENT_URL=http://localhost:4300
 ```
 
 前端 API 地址：
 
 ```text
-VITE_API_URL=http://localhost:4000
+稳定单端口模式下无需单独配置 VITE_API_URL
 ```
 
 ## 10. 系统架构图

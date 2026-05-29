@@ -38,15 +38,15 @@ Web 页面和小程序必须连到同一个 `4300` 后端实例，才能共享�
 - `pages/index`：好物专场列表。
 - `pages/live/index`：专场详情、商品画面、实时快照、参与金额、确认后模拟支付。
 - `pages/orders/index`：我的订单。
-- 登录使用 `/api/auth/miniprogram/login` 的 `mockCode` 演示模式。
+- 登录优先使用 `wx.login()` 获取微信 code，后端配置小程序 AppID/Secret 后换取 openid；本地未配置时自动回落到稳定演示身份。
+- 首页区分买家注册和买家登录；注册只创建账号，登录才进入专场。
 - 详情页使用 REST 轮询同步，出价也走 HTTP 接口，避免微信开发者工具 WebSocket timeout 阻断演示。
 
 ## 生产边界
 
 真实上线需要替换：
 
-- 正式微信 `appId`。
-- `wx.login` + 后端 `code2Session`。
+- 正式微信 `appId` 和 `secret` 环境变量。
 - HTTPS request 合法域名和 WSS socket 合法域名。
 - 真实音视频组件权限和内容服务。
 - 微信支付沙箱或正式支付。
