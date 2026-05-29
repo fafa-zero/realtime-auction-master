@@ -8,8 +8,26 @@
 
   <view class="login-card">
     <view>
-      <text class="login-title">买家登录</text>
-      <text class="muted">登录后进入好物专场，重复登录会复用同一个演示身份。</text>
+      <text class="login-title">{{authMode === "register" ? "买家注册" : "买家登录"}}</text>
+      <text class="muted">
+        {{authMode === "register" ? "先注册买家账号，注册成功后再登录进入专场。" : "使用已注册买家账号登录后进入好物专场。"}}
+      </text>
+    </view>
+    <view class="auth-tabs">
+      <button
+        class="auth-tab {{authMode === 'login' ? 'active' : ''}}"
+        data-mode="login"
+        bindtap="setAuthMode"
+      >
+        登录
+      </button>
+      <button
+        class="auth-tab {{authMode === 'register' ? 'active' : ''}}"
+        data-mode="register"
+        bindtap="setAuthMode"
+      >
+        注册
+      </button>
     </view>
     <input
       value="{{nickname}}"
@@ -17,12 +35,26 @@
       bindinput="onNicknameInput"
       disabled="{{loggedIn}}"
     />
-    <button wx:if="{{!loggedIn}}" class="primary" loading="{{loggingIn}}" bindtap="loginBuyer">
-      进入好物专场
+    <button
+      wx:if="{{!loggedIn && authMode === 'login'}}"
+      class="primary"
+      loading="{{loggingIn}}"
+      bindtap="loginBuyer"
+    >
+      登录进入专场
+    </button>
+    <button
+      wx:elif="{{!loggedIn && authMode === 'register'}}"
+      class="primary"
+      loading="{{registering}}"
+      bindtap="registerBuyer"
+    >
+      注册买家账号
     </button>
     <button wx:else class="secondary" bindtap="logout">取消登录</button>
   </view>
 
+  <view wx:if="{{success}}" class="card success">{{success}}</view>
   <view wx:if="{{loading}}" class="card muted">正在加载专场...</view>
   <view wx:elif="{{error}}" class="card error">{{error}}</view>
 

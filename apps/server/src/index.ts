@@ -25,6 +25,7 @@ import {
   loginWebUser,
   payOrder,
   placeBid,
+  registerMiniprogram,
   registerWebUser,
   settleAuction,
   startAuction,
@@ -94,6 +95,22 @@ app.post("/api/auth/miniprogram/login", (req, res) => {
     const input = schema.parse(req.body ?? {});
     const result = loginMiniprogram(input);
     res.json({ ok: true, ...result });
+  } catch (error) {
+    res.status(401).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
+app.post("/api/auth/miniprogram/register", (req, res) => {
+  try {
+    const schema = z.object({
+      code: z.string().min(1).optional(),
+      mockCode: z.string().min(1).optional(),
+      nickname: z.string().min(1).max(40).optional(),
+      avatarUrl: z.string().max(500).optional()
+    });
+    const input = schema.parse(req.body ?? {});
+    const user = registerMiniprogram(input);
+    res.json({ ok: true, user });
   } catch (error) {
     res.status(400).json({ ok: false, message: getErrorMessage(error) });
   }

@@ -1,4 +1,4 @@
-const { getDefaultApiBaseUrl, getMe, loginDemo } = require("./utils/api");
+const { getDefaultApiBaseUrl, getMe, loginBuyer, registerBuyer } = require("./utils/api");
 
 const DEFAULT_API_BASE_URL = getDefaultApiBaseUrl();
 const TOKEN_STORAGE_KEY = "auction_token";
@@ -67,10 +67,16 @@ App({
     throw new Error("请先登录后进入专场");
   },
 
-  async loginDemoUser(input = {}) {
+  async registerBuyer(input = {}) {
     const nickname = input.nickname || wx.getStorageSync("auction_nickname") || "演示买家";
     wx.setStorageSync("auction_nickname", nickname);
-    const result = await loginDemo({ nickname });
+    return registerBuyer({ nickname });
+  },
+
+  async loginBuyer(input = {}) {
+    const nickname = input.nickname || wx.getStorageSync("auction_nickname") || "演示买家";
+    wx.setStorageSync("auction_nickname", nickname);
+    const result = await loginBuyer({ nickname });
 
     this.globalData.token = result.token;
     this.globalData.user = result.user;

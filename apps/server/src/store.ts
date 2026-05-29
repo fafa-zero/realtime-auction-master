@@ -91,7 +91,7 @@ export interface StartAuctionOptions {
   productId?: string;
 }
 
-export interface LoginMiniprogramInput {
+export interface MiniprogramAuthInput {
   code?: string;
   mockCode?: string;
   nickname?: string;
@@ -189,37 +189,49 @@ export function getOrder(orderId: string) {
   return order;
 }
 
-export function loginMiniprogram(input: LoginMiniprogramInput) {
-  const loginCode = input.mockCode?.trim() || input.code?.trim();
-
-  if (!loginCode) {
-    throw new Error("小程序登录 code 不能为空");
-  }
-
-  const openId = input.mockCode ? `mock-openid-${loginCode}` : `wx-code-${loginCode}`;
+export function registerMiniprogram(input: MiniprogramAuthInput) {
+  const openId = getMiniprogramOpenId(input);
   let user = users.find((item) => item.openId === openId);
 
-  if (!user) {
+  if (user?.miniprogramRegisteredAt) {
+    throw new Error("买家已注册，请直接登录");
+  }
+
+  if (user) {
+    updateUserProfile(user, input);
+    user.miniprogramRegisteredAt = Date.now();
+  } else {
     user = {
       id: `user-${randomUUID()}`,
       openId,
+      miniprogramRegisteredAt: Date.now(),
       nickname: input.nickname?.trim() || "小程序用户",
       avatarUrl: input.avatarUrl ?? "",
       role: "BUYER",
       createdAt: Date.now()
     };
     users.push(user);
-  } else {
-    updateUserProfile(user, input);
   }
 
-  const session: Session = {
-    token: `sess-${randomUUID()}`,
-    userId: user.id,
-    expiresAt: Date.now() + SESSION_TTL_MS
-  };
+  saveState();
 
-  sessions.push(session);
+  return sanitizeUser(user);
+}
+
+export function loginMiniprogram(input: MiniprogramAuthInput) {
+  const openId = getMiniprogramOpenId(input);
+  const user = users.find((item) => item.openId === openId);
+
+  if (!user) {
+    throw new Error("买家账号不存在，请先注册");
+  }
+
+  if (!user.miniprogramRegisteredAt) {
+    throw new Error("买家账号未注册，请先注册");
+  }
+
+  updateUserProfile(user, input);
+  const session = createSession(user.id);
   removeExpiredSessions();
   saveState();
 
@@ -871,6 +883,16 @@ function createSession(userId: string): Session {
   return session;
 }
 
+function getMiniprogramOpenId(input: MiniprogramAuthInput) {
+  const loginCode = input.mockCode?.trim() || input.code?.trim();
+
+  if (!loginCode) {
+    throw new Error("小程序登录 code 不能为空");
+  }
+
+  return input.mockCode ? `mock-openid-${loginCode}` : `wx-code-${loginCode}`;
+}
+
 function normalizeAccount(account: string) {
   const normalized = account.trim().toLowerCase();
 
@@ -1155,6 +1177,7 @@ function sanitizeUser(user: User) {
   return {
     id: user.id,
     account: user.account,
+    miniprogramRegisteredAt: user.miniprogramRegisteredAt,
     nickname: user.nickname,
     avatarUrl: user.avatarUrl,
     role: user.role,

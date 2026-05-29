@@ -19,8 +19,11 @@ Page({
   data: {
     loading: false,
     loggingIn: false,
+    registering: false,
     loggedIn: false,
+    authMode: "login",
     error: "",
+    success: "",
     rooms: fallbackRooms,
     nickname: "演示买家",
     userText: "请先登录",
@@ -34,6 +37,7 @@ Page({
     this.setData({
       loading: false,
       error: "",
+      success: "",
       nickname: storedNickname
     });
 
@@ -64,12 +68,20 @@ Page({
     this.setData({ nickname: event.detail.value });
   },
 
+  setAuthMode(event) {
+    this.setData({
+      authMode: event.currentTarget.dataset.mode,
+      error: "",
+      success: ""
+    });
+  },
+
   async loginBuyer() {
     const nickname = String(this.data.nickname || "").trim() || "演示买家";
-    this.setData({ loggingIn: true, error: "" });
+    this.setData({ loggingIn: true, error: "", success: "" });
 
     try {
-      const result = await getApp().loginDemoUser({ nickname });
+      const result = await getApp().loginBuyer({ nickname });
       this.setData({
         loggedIn: true,
         userText: `当前用户：${result.user.nickname}`,
@@ -83,10 +95,29 @@ Page({
     }
   },
 
+  async registerBuyer() {
+    const nickname = String(this.data.nickname || "").trim() || "演示买家";
+    this.setData({ registering: true, error: "", success: "" });
+
+    try {
+      const result = await getApp().registerBuyer({ nickname });
+      this.setData({
+        authMode: "login",
+        nickname: result.user.nickname,
+        success: `买家 ${result.user.nickname} 注册成功，请登录后进入专场`
+      });
+    } catch (error) {
+      this.setData({ error: error.message || "注册失败" });
+    } finally {
+      this.setData({ registering: false });
+    }
+  },
+
   logout() {
     getApp().logout();
     this.setData({
       loggedIn: false,
+      success: "",
       userText: "请先登录后进入专场",
       rooms: fallbackRooms
     });
@@ -113,6 +144,7 @@ Page({
       this.setData({
         rooms: fallbackRooms,
         error: "",
+        success: "",
         userText: "演示登录用户",
         apiText: `后端：${getApp().globalData.apiBaseUrl}，列表使用本地兜底`
       });

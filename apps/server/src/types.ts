@@ -33,6 +33,7 @@ export interface LiveRoom {
 export interface User {
   id: string;
   openId?: string;
+  miniprogramRegisteredAt?: number;
   account?: string;
   password?: string;
   nickname: string;

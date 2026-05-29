@@ -137,13 +137,33 @@ function requestWithFallback(baseUrls, path, options, headers) {
   });
 }
 
-function loginDemo(input = {}) {
+function getMockCode() {
   let mockCode = wx.getStorageSync("auction_mock_code");
 
   if (!mockCode) {
     mockCode = `mock-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     wx.setStorageSync("auction_mock_code", mockCode);
   }
+
+  return mockCode;
+}
+
+function registerBuyer(input = {}) {
+  const mockCode = getMockCode();
+
+  return request("/api/auth/miniprogram/register", {
+    method: "POST",
+    data: {
+      mockCode,
+      nickname: input.nickname || "小程序用户",
+      avatarUrl: input.avatarUrl || ""
+    },
+    token: ""
+  });
+}
+
+function loginBuyer(input = {}) {
+  const mockCode = getMockCode();
 
   return request("/api/auth/miniprogram/login", {
     method: "POST",
@@ -199,9 +219,10 @@ module.exports = {
   getLiveRoom,
   getLiveRooms,
   getMyOrders,
-  loginDemo,
+  loginBuyer,
   payOrder,
   placeBid,
+  registerBuyer,
   request,
   setApiBaseUrl
 };
