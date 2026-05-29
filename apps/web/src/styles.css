@@ -438,6 +438,11 @@ h2 {
   line-height: 1.6;
 }
 
+.product-ai-note.buyer-script {
+  border-left-color: var(--green);
+  background: #f1fbf6;
+}
+
 .product-stock {
   margin: 10px 0 0;
   color: var(--green);
@@ -911,6 +916,10 @@ h2 {
   color: #334250;
   font-size: 13px;
   line-height: 1.55;
+}
+
+.queue-row p.buyer-queue-script {
+  color: var(--green);
 }
 
 .queue-status {

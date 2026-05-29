@@ -240,7 +240,11 @@ Page({
       liveBadgeText: badgeMap[snapshot.auction.status] || snapshot.auction.status,
       leaderText: snapshot.auction.winnerNickname || "暂无领先用户",
       bidCountText: `${bids.length} 条记录`,
-      aiScriptText: product.aiScript ? product.aiScript.slice(0, 120) : "主播正在准备 AI 好物讲解",
+      aiScriptText: product.buyerAiScript
+        ? product.buyerAiScript.slice(0, 120)
+        : product.aiScript
+          ? product.aiScript.slice(0, 120)
+          : "主播正在准备 AI 好物讲解",
       productStateText: this.getProductStateText(snapshot),
       progressPercent,
       progressText: `${progressPercent}%`,

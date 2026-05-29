@@ -14,6 +14,7 @@ export interface Product {
   sellingPoints?: string;
   scriptKeywords?: string;
   aiScript?: string;
+  buyerAiScript?: string;
   aiScriptUpdatedAt?: number;
   queueStatus?: "QUEUED" | "ACTIVE" | "SOLD" | "UNSOLD" | "CANCELLED";
   importedAt?: number;

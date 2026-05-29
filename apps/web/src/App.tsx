@@ -1009,7 +1009,10 @@ export function App() {
             <p>{snapshot.product.description}</p>
             <p className="product-stock">库存：{snapshot.product.stock ?? 1} 件</p>
             {snapshot.product.aiScript ? (
-              <p className="product-ai-note">AI 讲解：{snapshot.product.aiScript}</p>
+              <p className="product-ai-note">主播讲解：{snapshot.product.aiScript}</p>
+            ) : null}
+            {snapshot.product.buyerAiScript ? (
+              <p className="product-ai-note buyer-script">买家版：{snapshot.product.buyerAiScript}</p>
             ) : null}
             <p className="product-note">{stageDetail}</p>
           </div>
@@ -1226,6 +1229,7 @@ export function App() {
                           {formatMoney(item.auction.ceilingPrice)} / 库存 {item.product.stock ?? 1} 件
                         </span>
                         {item.product.aiScript ? <p>{item.product.aiScript}</p> : null}
+                        {item.product.buyerAiScript ? <p className="buyer-queue-script">{item.product.buyerAiScript}</p> : null}
                       </div>
                       <div className="queue-row-actions">
                         <button

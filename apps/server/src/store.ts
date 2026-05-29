@@ -357,6 +357,7 @@ export function importAuctionProducts(liveRoomId: string, rows: ProductImportRow
         sellingPoints: normalized.sellingPoints,
         scriptKeywords: normalized.scriptKeywords,
         aiScript: buildLocalProductScript(liveRoom, normalized),
+        buyerAiScript: buildLocalBuyerProductScript(normalized),
         aiScriptUpdatedAt: Date.now(),
         queueStatus: "QUEUED",
         importedAt: Date.now() + index
@@ -629,7 +630,7 @@ export async function generateProductScript(liveRoomId = DEFAULT_LIVE_ROOM_ID, p
   const liveRoom = requireLiveRoom(liveRoomId);
   const auction = productId ? requireAuctionForProduct(liveRoomId, productId) : requireAuctionForLiveRoom(liveRoomId);
   const product = requireProduct(auction.productId);
-  const fallbackContent = buildLocalProductScript(liveRoom, {
+  const productScriptInput = {
     name: product.name,
     description: product.description,
     startPrice: auction.startPrice,
@@ -639,7 +640,8 @@ export async function generateProductScript(liveRoomId = DEFAULT_LIVE_ROOM_ID, p
     stock: product.stock ?? 1,
     sellingPoints: product.sellingPoints,
     scriptKeywords: product.scriptKeywords
-  });
+  };
+  const fallbackContent = buildLocalProductScript(liveRoom, productScriptInput);
 
   const result = await completeWithModel({
     title: "AI 商品讲解词",
@@ -649,6 +651,7 @@ export async function generateProductScript(liveRoomId = DEFAULT_LIVE_ROOM_ID, p
   });
 
   product.aiScript = result.content;
+  product.buyerAiScript = buildLocalBuyerProductScript(productScriptInput);
   product.aiScriptUpdatedAt = result.generatedAt;
   saveState();
 
@@ -955,6 +958,13 @@ function buildLocalProductScript(liveRoom: LiveRoom, row: ProductImportRow) {
   const keywords = row.scriptKeywords ? `讲解时可以突出${row.scriptKeywords}。` : "适合在直播间重点展示细节和使用场景。";
 
   return `${liveRoom.hostName}为大家带来${row.name}，${sellingPoints}${row.startPrice} 元起拍，每次最低加价 ${row.incrementStep} 元，封顶价 ${row.ceilingPrice} 元，竞拍时长 ${row.durationSeconds} 秒，库存 ${row.stock ?? 1} 件。${keywords}`;
+}
+
+function buildLocalBuyerProductScript(row: ProductImportRow) {
+  const sellingPoints = row.sellingPoints ? `${row.sellingPoints}。` : row.description;
+  const keywords = row.scriptKeywords ? `看点：${row.scriptKeywords}。` : "";
+
+  return `${row.name}：${sellingPoints}${keywords}起拍 ${row.startPrice} 元，每次最低加价 ${row.incrementStep} 元，封顶 ${row.ceilingPrice} 元。`;
 }
 
 function cloneProductWithQueueStatus(product: Product, auction: Auction): Product {
