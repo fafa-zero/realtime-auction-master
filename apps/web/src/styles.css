@@ -100,6 +100,52 @@ button:disabled {
   margin-top: 22px;
 }
 
+.auth-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  margin: 18px 0 16px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7fafc;
+}
+
+.auth-tabs button {
+  min-height: 34px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.auth-tabs button.active {
+  color: #fff;
+  background: var(--ink);
+}
+
+.auth-form {
+  display: grid;
+  gap: 12px;
+}
+
+.auth-form .field {
+  margin-bottom: 0;
+}
+
+.auth-form select,
+.field select {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+  color: var(--ink);
+  background: #fbfcfd;
+  font: inherit;
+}
+
 .login-actions button,
 .route-error-actions button,
 .link-button,

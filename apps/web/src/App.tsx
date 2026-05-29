@@ -14,6 +14,7 @@ import {
   Package,
   PlayCircle,
   Radio,
+  Save,
   RotateCcw,
   ShieldAlert,
   Sparkles,
@@ -67,6 +68,13 @@ type AiResult = {
 type WebSession = {
   token: string;
   user: AuthUser;
+};
+
+type RegisterInput = {
+  account: string;
+  password: string;
+  nickname: string;
+  role: "HOST" | "BUYER";
 };
 
 type ImportResult = {
@@ -153,6 +161,7 @@ export function App() {
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [importingProducts, setImportingProducts] = useState(false);
   const [authMessage, setAuthMessage] = useState("");
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const socketRef = useRef<Socket | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const currentUser = session?.user ?? null;
@@ -179,7 +188,7 @@ export function App() {
         const res = await fetch(`${API_URL}/api/me`, {
           headers: { Authorization: `Bearer ${session.token}` }
         });
-        const data = (await res.json()) as { user?: AuthUser };
+        const data = await readJson<{ user?: AuthUser }>(res);
 
         if (!res.ok || !data.user) {
           throw new Error("登录已失效");
@@ -231,8 +240,8 @@ export function App() {
           fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}`),
           fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/auction`)
         ]);
-        const roomData = (await roomRes.json()) as { room?: LiveRoom; message?: string };
-        const auctionData = (await auctionRes.json()) as AuctionSnapshot & { message?: string };
+        const roomData = await readJson<{ room?: LiveRoom; message?: string }>(roomRes);
+        const auctionData = await readJson<AuctionSnapshot & { message?: string }>(auctionRes);
 
         if (!roomRes.ok) {
           throw new Error(roomData.message ?? "直播间不存在");
@@ -354,7 +363,7 @@ export function App() {
 
   useEffect(() => {
     fetch(`${API_URL}/api/live-rooms`)
-      .then((res) => res.json())
+      .then((res) => readJson<{ items?: LiveRoom[] }>(res))
       .then((data: { items?: LiveRoom[] }) => setLiveRooms(data.items ?? []))
       .catch(() => {
         // The page can still operate with the current room snapshot.
@@ -439,6 +448,38 @@ export function App() {
     }
   }
 
+  async function handleRegister(input: RegisterInput) {
+    setAuthMessage("正在注册账号...");
+
+    try {
+      const result = await registerWeb(input);
+      setAuthMessage(`账号 ${result.user.account ?? input.account} 注册成功，请登录`);
+      setAuthMode("login");
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : "注册失败");
+    }
+  }
+
+  async function handleManualLogin(input: { account: string; password: string }) {
+    setAuthMessage("正在登录账号...");
+
+    try {
+      const session = await loginWeb(input);
+      setSession(session);
+      writeStoredSession(session);
+      setAuthMessage("");
+      setMessage(`已登录：${session.user.nickname}`);
+
+      if (session.user.role === "BUYER") {
+        navigateTo(`/live/${liveRoomId}`, setRoute);
+      } else {
+        navigateTo(`/host?liveRoomId=${encodeURIComponent(liveRoomId)}`, setRoute);
+      }
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : "登录失败");
+    }
+  }
+
   async function handleLogout() {
     setSession(null);
     writeStoredSession(null);
@@ -475,7 +516,7 @@ export function App() {
         ceilingPrice: ceiling
       })
     });
-    const data = await res.json();
+    const data = await readJson<AuctionSnapshot & { message?: string }>(res);
 
     if (!res.ok) {
       setMessage(data.message ?? "启动竞拍失败");
@@ -493,7 +534,7 @@ export function App() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ reason: "主播手动取消异常竞拍" })
     });
-    const data = await res.json();
+    const data = await readJson<AuctionSnapshot & { message?: string }>(res);
 
     if (!res.ok) {
       setMessage(data.message ?? "取消竞拍失败");
@@ -626,7 +667,7 @@ export function App() {
               body: JSON.stringify({ liveRoomId, productId: snapshot?.product.id })
             };
       const res = await fetch(`${API_URL}${endpoint}`, init);
-      const data = await res.json();
+      const data = await readJson<AiResult>(res);
 
       if (!res.ok) {
         setMessage(data.message ?? "AI 助手生成失败");
@@ -635,7 +676,8 @@ export function App() {
 
       setAiResult(data);
       if (data.product) {
-        setSnapshot((current) => (current ? { ...current, product: data.product } : current));
+        const product = data.product;
+        setSnapshot((current) => (current ? { ...current, product } : current));
       }
       void refreshProductQueue();
       setMessage(
@@ -656,7 +698,7 @@ export function App() {
     }
 
     const res = await fetch(`${API_URL}/api/orders/${snapshot.order.id}/pay`, { method: "POST" });
-    const data = (await res.json()) as PayOrderResponse & { message?: string };
+    const data = await readJson<PayOrderResponse & { message?: string }>(res);
 
     if (!res.ok) {
       setMessage(data.message ?? "支付失败");
@@ -682,8 +724,8 @@ export function App() {
         fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/auction/history`),
         fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/orders`)
       ]);
-      const historyData = (await historyRes.json()) as { items?: AuctionHistoryItem[] };
-      const ordersData = (await ordersRes.json()) as { items?: Order[] };
+      const historyData = await readJson<{ items?: AuctionHistoryItem[] }>(historyRes);
+      const ordersData = await readJson<{ items?: Order[] }>(ordersRes);
 
       setHistoryItems(historyData.items ?? []);
       setOrders(ordersData.items ?? []);
@@ -695,7 +737,7 @@ export function App() {
   async function refreshProductQueue() {
     try {
       const res = await fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/products`);
-      const data = (await res.json()) as { items?: ProductQueueItem[]; message?: string };
+      const data = await readJson<{ items?: ProductQueueItem[]; message?: string }>(res);
 
       if (!res.ok) {
         throw new Error(data.message ?? "商品队列加载失败");
@@ -725,10 +767,10 @@ export function App() {
         method: "POST",
         body: formData
       });
-      const data = (await res.json()) as ImportResult & {
+      const data = await readJson<ImportResult & {
         items?: ProductQueueItem[];
         message?: string;
-      };
+      }>(res);
 
       if (!res.ok) {
         throw new Error(data.message ?? "导入失败");
@@ -753,7 +795,7 @@ export function App() {
       `${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/products/${encodeURIComponent(productId)}/start`,
       { method: "POST" }
     );
-    const data = (await res.json()) as AuctionSnapshot & { message?: string };
+    const data = await readJson<AuctionSnapshot & { message?: string }>(res);
 
     if (!res.ok) {
       setMessage(data.message ?? "开始商品竞拍失败");
@@ -778,7 +820,7 @@ export function App() {
         `${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/products/${encodeURIComponent(productId)}/ai-script`,
         { method: "POST" }
       );
-      const data = (await res.json()) as AiResult;
+      const data = await readJson<AiResult>(res);
 
       if (!res.ok) {
         setMessage(data.message ?? "讲解词生成失败");
@@ -807,6 +849,10 @@ export function App() {
         authChecked={authChecked}
         message={authMessage}
         onDemoLogin={handleDemoLogin}
+        onShowRegister={() => {
+          setAuthMode("register");
+          navigateTo("/host", setRoute);
+        }}
         onLogout={handleLogout}
         onGoHost={() => navigateTo("/host", setRoute)}
         onGoLive={(targetLiveRoomId) => navigateTo(`/live/${targetLiveRoomId}`, setRoute)}
@@ -827,7 +873,11 @@ export function App() {
     return (
       <LoginRoute
         message={authMessage || "商家控制台需要先登录演示账号"}
+        mode={authMode}
+        onModeChange={setAuthMode}
         onDemoLogin={handleDemoLogin}
+        onLogin={handleManualLogin}
+        onRegister={handleRegister}
         onGoLive={() => navigateTo(`/live/${liveRoomId}`, setRoute)}
       />
     );
@@ -1430,18 +1480,108 @@ function RouteError(props: {
 
 function LoginRoute(props: {
   message: string;
+  mode: "login" | "register";
+  onModeChange: (mode: "login" | "register") => void;
   onDemoLogin: (role: "HOST" | "BUYER") => void;
+  onLogin: (input: { account: string; password: string }) => void;
+  onRegister: (input: RegisterInput) => void;
   onGoLive: () => void;
 }) {
+  const [account, setAccount] = useState("");
+  const [password, setPassword] = useState("");
+  const [nickname, setNickname] = useState("");
+  const [role, setRole] = useState<"HOST" | "BUYER">("HOST");
+  const isRegister = props.mode === "register";
+
+  function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+
+    if (isRegister) {
+      props.onRegister({
+        account,
+        password,
+        nickname,
+        role
+      });
+      return;
+    }
+
+    props.onLogin({
+      account,
+      password
+    });
+  }
+
   return (
     <main className="route-error login-route">
       <div>
         <UserCheck size={28} />
         <p className="eyebrow">商家登录</p>
-        <h1>进入竞拍控制台</h1>
+        <h1>{isRegister ? "注册演示账号" : "进入竞拍控制台"}</h1>
         <p>{props.message}</p>
+        <div className="auth-tabs" role="tablist" aria-label="账号操作">
+          <button
+            className={!isRegister ? "active" : ""}
+            type="button"
+            onClick={() => props.onModeChange("login")}
+          >
+            登录
+          </button>
+          <button
+            className={isRegister ? "active" : ""}
+            type="button"
+            onClick={() => props.onModeChange("register")}
+          >
+            注册
+          </button>
+        </div>
+        <form className="auth-form" onSubmit={handleSubmit}>
+          <label className="field">
+            <span>账号</span>
+            <input
+              value={account}
+              maxLength={80}
+              placeholder="username / phone / email"
+              onChange={(event) => setAccount(event.target.value)}
+            />
+          </label>
+          {isRegister ? (
+            <label className="field">
+              <span>昵称</span>
+              <input
+                value={nickname}
+                maxLength={40}
+                placeholder="商家或主播名称"
+                onChange={(event) => setNickname(event.target.value)}
+              />
+            </label>
+          ) : null}
+          <label className="field">
+            <span>密码</span>
+            <input
+              type="password"
+              value={password}
+              maxLength={80}
+              placeholder="演示口令"
+              onChange={(event) => setPassword(event.target.value)}
+            />
+          </label>
+          {isRegister ? (
+            <label className="field">
+              <span>角色</span>
+              <select value={role} onChange={(event) => setRole(event.target.value as "HOST" | "BUYER")}>
+                <option value="HOST">商家/主播</option>
+                <option value="BUYER">买家预览</option>
+              </select>
+            </label>
+          ) : null}
+          <button className="primary-button" type="submit">
+            {isRegister ? <Save size={16} /> : <UserCheck size={16} />}
+            {isRegister ? "注册账号" : "账号登录"}
+          </button>
+        </form>
         <div className="login-actions">
-          <button className="primary-button" onClick={() => props.onDemoLogin("HOST")}>
+          <button onClick={() => props.onDemoLogin("HOST")}>
             <Radio size={16} />
             商家/主播登录
           </button>
@@ -1464,6 +1604,7 @@ function HomeRoute(props: {
   authChecked: boolean;
   message: string;
   onDemoLogin: (role: "HOST" | "BUYER") => void;
+  onShowRegister: () => void;
   onLogout: () => void;
   onGoHost: () => void;
   onGoLive: (liveRoomId: string) => void;
@@ -1492,6 +1633,11 @@ function HomeRoute(props: {
             买家预览入口
           </button>
         </div>
+        {!props.session ? (
+          <button className="link-button" onClick={props.onShowRegister}>
+            注册新的商家账号
+          </button>
+        ) : null}
         {props.session ? (
           <button className="link-button" onClick={props.onLogout}>
             退出当前账号
@@ -1551,11 +1697,11 @@ async function loginWeb(input: { account: string; password: string }): Promise<W
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input)
   });
-  const data = (await res.json()) as {
+  const data = await readJson<{
     token?: string;
     user?: AuthUser;
     message?: string;
-  };
+  }>(res);
 
   if (!res.ok || !data.token || !data.user) {
     throw new Error(data.message ?? "登录失败");
@@ -1565,6 +1711,41 @@ async function loginWeb(input: { account: string; password: string }): Promise<W
     token: data.token,
     user: data.user
   };
+}
+
+async function registerWeb(input: RegisterInput): Promise<{ user: AuthUser }> {
+  const res = await fetch(`${API_URL}/api/auth/web/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  const data = await readJson<{
+    user?: AuthUser;
+    message?: string;
+  }>(res);
+
+  if (!res.ok || !data.user) {
+    throw new Error(data.message ?? "注册失败");
+  }
+
+  return { user: data.user };
+}
+
+async function readJson<T>(res: Response): Promise<T> {
+  const contentType = res.headers.get("content-type") ?? "";
+
+  if (contentType.includes("application/json")) {
+    return (await res.json()) as T;
+  }
+
+  const text = await res.text();
+  const preview = text.replace(/\s+/g, " ").slice(0, 80);
+
+  throw new Error(
+    preview.startsWith("<!DOCTYPE") || preview.startsWith("<html")
+      ? "接口返回了页面 HTML，请确认后端已重启且 VITE_API_URL/代理地址指向后端服务"
+      : preview || "接口返回格式不是 JSON"
+  );
 }
 
 function readStoredSession(): WebSession | null {
