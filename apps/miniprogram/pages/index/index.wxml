@@ -20,7 +20,7 @@
     <button wx:if="{{!loggedIn}}" class="primary" loading="{{loggingIn}}" bindtap="loginBuyer">
       进入好物专场
     </button>
-    <button wx:else class="secondary" bindtap="logout">退出登录</button>
+    <button wx:else class="secondary" bindtap="logout">取消登录</button>
   </view>
 
   <view wx:if="{{loading}}" class="card muted">正在加载专场...</view>

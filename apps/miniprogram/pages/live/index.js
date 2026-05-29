@@ -191,6 +191,20 @@ Page({
     wx.redirectTo({ url: "/pages/index/index" });
   },
 
+  logout() {
+    getApp().logout();
+    this.closeRealtime();
+    clearInterval(this.clockTimer);
+    clearInterval(this.pollingTimer);
+    this.setData({
+      authorized: false,
+      checkingLogin: false,
+      error: "",
+      buyerText: "买家未登录"
+    });
+    wx.redirectTo({ url: "/pages/index/index" });
+  },
+
   async loadSnapshot() {
     if (!this.data.authorized || this.data.loading || this.snapshotLoading) {
       return;

@@ -3,6 +3,28 @@
   gap: 18rpx;
 }
 
+.live-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+  margin-bottom: 18rpx;
+}
+
+.live-actions text {
+  flex: 1;
+  min-width: 0;
+}
+
+.compact-button {
+  width: 180rpx;
+  min-height: 68rpx;
+  margin: 0;
+  padding: 0 18rpx;
+  font-size: 24rpx;
+  line-height: 68rpx;
+}
+
 .stage {
   position: relative;
   overflow: hidden;

@@ -9,6 +9,11 @@
   <view wx:elif="{{error}}" class="card error">{{error}}</view>
 
   <view wx:else>
+    <view class="live-actions">
+      <text class="muted">{{buyerText}}</text>
+      <button class="secondary compact-button" bindtap="logout">取消登录</button>
+    </view>
+
     <view class="stage">
       <image wx:if="{{snapshot.product.imageUrl}}" src="{{snapshot.product.imageUrl}}" mode="aspectFill" />
       <view wx:else class="stage-placeholder">模拟直播画面</view>
