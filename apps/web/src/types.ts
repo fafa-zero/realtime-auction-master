@@ -5,6 +5,17 @@ export interface Product {
   name: string;
   imageUrl: string;
   description: string;
+  liveRoomId?: string;
+  startPrice?: number;
+  incrementStep?: number;
+  ceilingPrice?: number;
+  durationSeconds?: number;
+  sellingPoints?: string;
+  scriptKeywords?: string;
+  aiScript?: string;
+  aiScriptUpdatedAt?: number;
+  queueStatus?: "QUEUED" | "ACTIVE" | "SOLD" | "UNSOLD" | "CANCELLED";
+  importedAt?: number;
 }
 
 export interface LiveRoom {
@@ -74,4 +85,18 @@ export interface AuctionHistoryItem {
   order: Order | null;
   participantCount: number;
   archivedAt: number;
+}
+
+export interface ProductQueueItem {
+  product: Product;
+  auction: Auction;
+}
+
+export interface AuthUser {
+  id: string;
+  account?: string;
+  nickname: string;
+  avatarUrl: string;
+  role: "BUYER" | "HOST" | "ADMIN";
+  createdAt: number;
 }

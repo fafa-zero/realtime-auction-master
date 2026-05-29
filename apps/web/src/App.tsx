@@ -10,22 +10,39 @@ import {
   Flame,
   FileText,
   History,
+  LogOut,
+  Package,
+  PlayCircle,
   Radio,
   RotateCcw,
   ShieldAlert,
   Sparkles,
   Timer,
   TrendingUp,
+  Upload,
   UserCheck,
   Users,
   Wifi,
   WifiOff
 } from "lucide-react";
 import { io, type Socket } from "socket.io-client";
-import type { AuctionHistoryItem, AuctionSnapshot, AuctionStatus, LiveRoom, Order } from "./types";
+import type {
+  AuctionHistoryItem,
+  AuctionSnapshot,
+  AuctionStatus,
+  AuthUser,
+  LiveRoom,
+  Order,
+  ProductQueueItem
+} from "./types";
 
 const API_URL = resolveApiUrl(import.meta.env.VITE_API_URL);
 const DEFAULT_LIVE_ROOM_ID = "live-1";
+const SESSION_STORAGE_KEY = "auction_web_session";
+const demoWebAccounts = {
+  HOST: { account: "demo-host", password: "demo123" },
+  BUYER: { account: "demo-buyer", password: "demo123" }
+} as const;
 
 const statusText = {
   PENDING: "待开始",
@@ -44,6 +61,17 @@ type AiResult = {
   fallback?: boolean;
   message?: string;
   level?: string;
+  product?: AuctionSnapshot["product"];
+};
+
+type WebSession = {
+  token: string;
+  user: AuthUser;
+};
+
+type ImportResult = {
+  importedCount: number;
+  failedRows: Array<{ rowNumber: number; reason: string }>;
 };
 
 type PayOrderResponse =
@@ -100,11 +128,12 @@ function resolveApiUrl(configuredApiUrl?: string) {
 
 export function App() {
   const [route, setRoute] = useState<AppRoute>(() => parseRoute(getCurrentPath()));
+  const [session, setSession] = useState<WebSession | null>(() => readStoredSession());
+  const [authChecked, setAuthChecked] = useState(false);
   const [snapshot, setSnapshot] = useState<AuctionSnapshot | null>(null);
   const [liveRoom, setLiveRoom] = useState<LiveRoom | null>(null);
   const [liveRooms, setLiveRooms] = useState<LiveRoom[]>([]);
   const [connected, setConnected] = useState(false);
-  const [userId] = useState(() => `user-${Math.floor(Math.random() * 9000 + 1000)}`);
   const [nickname, setNickname] = useState(() => `用户${Math.floor(Math.random() * 90 + 10)}`);
   const [bidPrice, setBidPrice] = useState("");
   const [durationSeconds, setDurationSeconds] = useState("90");
@@ -120,7 +149,14 @@ export function App() {
   const [aiTask, setAiTask] = useState<AiTask | null>(null);
   const [historyItems, setHistoryItems] = useState<AuctionHistoryItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [productQueue, setProductQueue] = useState<ProductQueueItem[]>([]);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [importingProducts, setImportingProducts] = useState(false);
+  const [authMessage, setAuthMessage] = useState("");
   const socketRef = useRef<Socket | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const currentUser = session?.user ?? null;
+  const userId = currentUser?.id ?? "guest-web";
   const viewMode = route.viewMode;
   const liveRoomId = route.liveRoomId;
 
@@ -129,6 +165,53 @@ export function App() {
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function verifySession() {
+      if (!session?.token) {
+        setAuthChecked(true);
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_URL}/api/me`, {
+          headers: { Authorization: `Bearer ${session.token}` }
+        });
+        const data = (await res.json()) as { user?: AuthUser };
+
+        if (!res.ok || !data.user) {
+          throw new Error("登录已失效");
+        }
+
+        if (!cancelled) {
+          const nextSession = { token: session.token, user: data.user };
+          setSession(nextSession);
+          writeStoredSession(nextSession);
+          setAuthChecked(true);
+        }
+      } catch {
+        if (!cancelled) {
+          setSession(null);
+          writeStoredSession(null);
+          setAuthChecked(true);
+        }
+      }
+    }
+
+    void verifySession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (currentUser?.nickname) {
+      setNickname(currentUser.nickname);
+    }
+  }, [currentUser?.nickname]);
 
   useEffect(() => {
     if (route.notFound || route.home) {
@@ -171,6 +254,7 @@ export function App() {
         setIncrementStep(String(auctionData.auction.incrementStep));
         setCeilingPrice(String(auctionData.auction.ceilingPrice));
         void refreshArchiveData();
+        void refreshProductQueue();
       } catch (error) {
         if (cancelled) {
           return;
@@ -327,6 +411,40 @@ export function App() {
   const myHistory = historyItems.filter((item) =>
     item.bids.some((bid) => bid.userId === userId || bid.nickname === nickname)
   );
+  const queueStats = getQueueStats(productQueue, orders);
+  const currentQueueItem = snapshot
+    ? productQueue.find((item) => item.product.id === snapshot.product.id) ?? null
+    : null;
+  const nextQueueItem =
+    productQueue.find((item) => item.product.queueStatus === "QUEUED") ??
+    productQueue.find((item) => item.auction.status === "PENDING") ??
+    null;
+
+  async function handleDemoLogin(role: "HOST" | "BUYER") {
+    setAuthMessage("正在登录演示账号...");
+    try {
+      const session = await loginWeb(demoWebAccounts[role]);
+      setSession(session);
+      writeStoredSession(session);
+      setAuthMessage("");
+      setMessage(`已登录：${session.user.nickname}`);
+
+      if (role === "HOST") {
+        navigateTo(`/host?liveRoomId=${encodeURIComponent(liveRoomId)}`, setRoute);
+      } else {
+        navigateTo(`/live/${liveRoomId}`, setRoute);
+      }
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : "登录失败");
+    }
+  }
+
+  async function handleLogout() {
+    setSession(null);
+    writeStoredSession(null);
+    setAuthMessage("");
+    navigateTo("/", setRoute);
+  }
 
   async function startAuction() {
     const duration = Number(durationSeconds);
@@ -500,9 +618,13 @@ export function App() {
           ? {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ userId, price })
+              body: JSON.stringify({ liveRoomId, userId, price })
             }
-          : { method: "POST" };
+          : {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ liveRoomId, productId: snapshot?.product.id })
+            };
       const res = await fetch(`${API_URL}${endpoint}`, init);
       const data = await res.json();
 
@@ -512,6 +634,10 @@ export function App() {
       }
 
       setAiResult(data);
+      if (data.product) {
+        setSnapshot((current) => (current ? { ...current, product: data.product } : current));
+      }
+      void refreshProductQueue();
       setMessage(
         data.message ??
           (data.source === "model" ? "AI 助手已生成结果" : "已使用本地 AI 兜底策略生成结果")
@@ -566,12 +692,143 @@ export function App() {
     }
   }
 
+  async function refreshProductQueue() {
+    try {
+      const res = await fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/products`);
+      const data = (await res.json()) as { items?: ProductQueueItem[]; message?: string };
+
+      if (!res.ok) {
+        throw new Error(data.message ?? "商品队列加载失败");
+      }
+
+      setProductQueue(data.items ?? []);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "商品队列加载失败");
+    }
+  }
+
+  async function handleProductFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    setImportingProducts(true);
+    setImportResult(null);
+    setMessage("正在导入商品模板...");
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/products/import`, {
+        method: "POST",
+        body: formData
+      });
+      const data = (await res.json()) as ImportResult & {
+        items?: ProductQueueItem[];
+        message?: string;
+      };
+
+      if (!res.ok) {
+        throw new Error(data.message ?? "导入失败");
+      }
+
+      setImportResult({
+        importedCount: data.importedCount,
+        failedRows: data.failedRows ?? []
+      });
+      setProductQueue(data.items ?? []);
+      setMessage(`导入完成：成功 ${data.importedCount} 件，失败 ${data.failedRows?.length ?? 0} 行`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "导入失败");
+    } finally {
+      setImportingProducts(false);
+      event.target.value = "";
+    }
+  }
+
+  async function startProductFromQueue(productId: string) {
+    const res = await fetch(
+      `${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/products/${encodeURIComponent(productId)}/start`,
+      { method: "POST" }
+    );
+    const data = (await res.json()) as AuctionSnapshot & { message?: string };
+
+    if (!res.ok) {
+      setMessage(data.message ?? "开始商品竞拍失败");
+      return;
+    }
+
+    setSnapshot(data);
+    setDurationSeconds(String(data.auction.durationSeconds));
+    setIncrementStep(String(data.auction.incrementStep));
+    setCeilingPrice(String(data.auction.ceilingPrice));
+    setMessage(`已开始：${data.product.name}`);
+    void refreshProductQueue();
+    void refreshArchiveData();
+  }
+
+  async function regenerateProductScript(productId: string) {
+    setAiLoading(true);
+    setAiTask("script");
+
+    try {
+      const res = await fetch(
+        `${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/products/${encodeURIComponent(productId)}/ai-script`,
+        { method: "POST" }
+      );
+      const data = (await res.json()) as AiResult;
+
+      if (!res.ok) {
+        setMessage(data.message ?? "讲解词生成失败");
+        return;
+      }
+
+      setAiResult(data);
+      if (data.product && snapshot?.product.id === data.product.id) {
+        setSnapshot({ ...snapshot, product: data.product });
+      }
+      setMessage(data.message ?? "讲解词已更新");
+      void refreshProductQueue();
+    } catch {
+      setMessage("讲解词生成失败");
+    } finally {
+      setAiLoading(false);
+      setAiTask(null);
+    }
+  }
+
   if (route.home) {
     return (
       <HomeRoute
         liveRoomId={liveRooms[0]?.id ?? DEFAULT_LIVE_ROOM_ID}
+        session={session}
+        authChecked={authChecked}
+        message={authMessage}
+        onDemoLogin={handleDemoLogin}
+        onLogout={handleLogout}
         onGoHost={() => navigateTo("/host", setRoute)}
         onGoLive={(targetLiveRoomId) => navigateTo(`/live/${targetLiveRoomId}`, setRoute)}
+      />
+    );
+  }
+
+  if (!authChecked) {
+    return (
+      <main className="loading-page">
+        <UserCheck className="spin" size={28} />
+        <p>正在校验登录状态...</p>
+      </main>
+    );
+  }
+
+  if (viewMode === "host" && !session) {
+    return (
+      <LoginRoute
+        message={authMessage || "商家控制台需要先登录演示账号"}
+        onDemoLogin={handleDemoLogin}
+        onGoLive={() => navigateTo(`/live/${liveRoomId}`, setRoute)}
       />
     );
   }
@@ -601,9 +858,11 @@ export function App() {
       <section className="live-panel">
         <div className="topbar">
           <div>
-            <p className="eyebrow">实时竞拍大师</p>
+              <p className="eyebrow">实时竞拍大师</p>
               <h1>{viewMode === "host" ? "直播间竞拍控制台" : "观众实时竞拍台"}</h1>
-              <p className="topbar-meta">{syncLabel} / Socket.IO 多端广播</p>
+              <p className="topbar-meta">
+                {syncLabel} / {currentUser ? currentUser.nickname : "未登录访客"} / Socket.IO 多端广播
+              </p>
             </div>
           <div className="topbar-actions">
             {viewMode === "host" ? (
@@ -641,6 +900,11 @@ export function App() {
               {connected ? <Wifi size={18} /> : <WifiOff size={18} />}
               {connected ? "实时连接" : "重连中"}
             </div>
+            {session ? (
+              <button className="icon-button" title="退出登录" onClick={handleLogout}>
+                <LogOut size={16} />
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -669,6 +933,9 @@ export function App() {
             <p className="eyebrow">当前商品</p>
             <h2>{snapshot.product.name}</h2>
             <p>{snapshot.product.description}</p>
+            {snapshot.product.aiScript ? (
+              <p className="product-ai-note">AI 讲解：{snapshot.product.aiScript}</p>
+            ) : null}
             <p className="product-note">{stageDetail}</p>
           </div>
           <div className={`status-pill status-${snapshot.auction.status.toLowerCase()}`}>
@@ -682,6 +949,15 @@ export function App() {
           <Metric label="封顶价" value={formatMoney(snapshot.auction.ceilingPrice)} />
           <Metric label="参与人数" value={`${snapshot.participantCount} 人`} />
         </div>
+
+        {viewMode === "host" ? (
+          <div className="queue-summary">
+            <Metric label="商品总数" value={`${queueStats.total} 件`} />
+            <Metric label="待竞拍" value={`${queueStats.queued} 件`} />
+            <Metric label="已成交" value={`${queueStats.sold} 件`} />
+            <Metric label="成交金额" value={formatMoney(queueStats.revenue)} />
+          </div>
+        ) : null}
       </section>
 
       <aside className="control-panel">
@@ -776,6 +1052,107 @@ export function App() {
 
         {viewMode === "host" ? (
           <>
+            <section className="panel-section import-panel">
+              <div className="section-title">
+                <Upload size={18} />
+                <h2>商品导入</h2>
+              </div>
+              <input
+                ref={fileInputRef}
+                className="hidden-file"
+                type="file"
+                accept=".xlsx,.csv,.txt"
+                onChange={handleProductFileChange}
+              />
+              <div className="button-row">
+                <button disabled={importingProducts} onClick={() => fileInputRef.current?.click()}>
+                  <Upload size={16} />
+                  <span>{importingProducts ? "导入中" : "上传模板"}</span>
+                </button>
+                <button onClick={refreshProductQueue}>
+                  <RotateCcw size={16} />
+                  <span>刷新队列</span>
+                </button>
+              </div>
+              <p className="muted template-hint">
+                表头：商品名称、商品描述、起拍价、最低加价、封顶价、竞拍时长秒、商品卖点、讲解关键词。
+              </p>
+              {importResult ? (
+                <div className="import-result">
+                  <strong>成功 {importResult.importedCount} 件</strong>
+                  {importResult.failedRows.length > 0 ? (
+                    <span>
+                      失败 {importResult.failedRows.length} 行：
+                      {importResult.failedRows
+                        .slice(0, 2)
+                        .map((row) => `${row.rowNumber} 行 ${row.reason}`)
+                        .join("；")}
+                    </span>
+                  ) : (
+                    <span>全部导入成功</span>
+                  )}
+                </div>
+              ) : null}
+            </section>
+
+            <section className="panel-section">
+              <div className="section-title">
+                <Package size={18} />
+                <h2>竞拍商品队列</h2>
+              </div>
+              {currentQueueItem || nextQueueItem ? (
+                <div className="queue-focus">
+                  <div>
+                    <span>当前</span>
+                    <strong>{currentQueueItem?.product.name ?? "暂无当前商品"}</strong>
+                  </div>
+                  <div>
+                    <span>下一件</span>
+                    <strong>{nextQueueItem?.product.name ?? "暂无待竞拍商品"}</strong>
+                  </div>
+                </div>
+              ) : null}
+              {productQueue.length === 0 ? (
+                <p className="muted">暂无导入商品，可先上传固定模板。</p>
+              ) : (
+                <div className="product-queue">
+                  {productQueue.map((item) => (
+                    <div className="queue-row" key={item.product.id}>
+                      <div>
+                        <div className="queue-row-head">
+                          <strong>{item.product.name}</strong>
+                          <span className={`queue-status queue-${(item.product.queueStatus ?? "QUEUED").toLowerCase()}`}>
+                            {getQueueStatusText(item.product.queueStatus)}
+                          </span>
+                        </div>
+                        <span>
+                          {formatMoney(item.auction.startPrice)} 起拍 / 加价 {formatMoney(item.auction.incrementStep)} / 封顶{" "}
+                          {formatMoney(item.auction.ceilingPrice)}
+                        </span>
+                        {item.product.aiScript ? <p>{item.product.aiScript}</p> : null}
+                      </div>
+                      <div className="queue-row-actions">
+                        <button
+                          disabled={snapshot.auction.status === "ACTIVE" || item.product.queueStatus === "ACTIVE"}
+                          title="开始竞拍"
+                          onClick={() => startProductFromQueue(item.product.id)}
+                        >
+                          <PlayCircle size={16} />
+                        </button>
+                        <button
+                          disabled={aiLoading}
+                          title="重新生成讲解词"
+                          onClick={() => regenerateProductScript(item.product.id)}
+                        >
+                          <Sparkles size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
             <section className="panel-section demo-panel">
               <div className="section-title">
                 <Flame size={18} />
@@ -1051,8 +1428,43 @@ function RouteError(props: {
   );
 }
 
+function LoginRoute(props: {
+  message: string;
+  onDemoLogin: (role: "HOST" | "BUYER") => void;
+  onGoLive: () => void;
+}) {
+  return (
+    <main className="route-error login-route">
+      <div>
+        <UserCheck size={28} />
+        <p className="eyebrow">商家登录</p>
+        <h1>进入竞拍控制台</h1>
+        <p>{props.message}</p>
+        <div className="login-actions">
+          <button className="primary-button" onClick={() => props.onDemoLogin("HOST")}>
+            <Radio size={16} />
+            商家/主播登录
+          </button>
+          <button onClick={() => props.onDemoLogin("BUYER")}>
+            <Users size={16} />
+            买家预览登录
+          </button>
+        </div>
+        <button className="link-button" onClick={props.onGoLive}>
+          不登录，打开观众预览
+        </button>
+      </div>
+    </main>
+  );
+}
+
 function HomeRoute(props: {
   liveRoomId: string;
+  session: WebSession | null;
+  authChecked: boolean;
+  message: string;
+  onDemoLogin: (role: "HOST" | "BUYER") => void;
+  onLogout: () => void;
   onGoHost: () => void;
   onGoLive: (liveRoomId: string) => void;
 }) {
@@ -1062,14 +1474,30 @@ function HomeRoute(props: {
         <Radio size={28} />
         <p className="eyebrow">实时竞拍大师</p>
         <h1>选择演示入口</h1>
-        <p>根路径不直接展示拍卖界面，请从主播端或观众预览入口进入。</p>
+        <p>
+          {props.session
+            ? `当前已登录：${props.session.user.nickname}`
+            : props.authChecked
+              ? "使用演示账号进入商家控制台或买家预览。"
+              : "正在校验登录状态..."}
+        </p>
+        {props.message ? <p className="route-hint">{props.message}</p> : null}
         <div className="route-error-actions">
-          <button onClick={props.onGoHost}>进入主播端</button>
-          <button className="primary-button" onClick={() => props.onGoLive(props.liveRoomId)}>
-            打开观众预览
+          <button className="primary-button" onClick={() => (props.session ? props.onGoHost() : props.onDemoLogin("HOST"))}>
+            <Radio size={16} />
+            商家/主播入口
+          </button>
+          <button onClick={() => (props.session ? props.onGoLive(props.liveRoomId) : props.onDemoLogin("BUYER"))}>
+            <Users size={16} />
+            买家预览入口
           </button>
         </div>
-        <p className="route-hint">可直接访问 /host 或 /live/{props.liveRoomId}</p>
+        {props.session ? (
+          <button className="link-button" onClick={props.onLogout}>
+            退出当前账号
+          </button>
+        ) : null}
+        <p className="route-hint">商家演示账号 demo-host / demo123，买家演示账号 demo-buyer / demo123。</p>
       </div>
     </main>
   );
@@ -1117,6 +1545,46 @@ function navigateTo(path: string, setRoute: (route: AppRoute) => void) {
   setRoute(parseRoute(path));
 }
 
+async function loginWeb(input: { account: string; password: string }): Promise<WebSession> {
+  const res = await fetch(`${API_URL}/api/auth/web/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  const data = (await res.json()) as {
+    token?: string;
+    user?: AuthUser;
+    message?: string;
+  };
+
+  if (!res.ok || !data.token || !data.user) {
+    throw new Error(data.message ?? "登录失败");
+  }
+
+  return {
+    token: data.token,
+    user: data.user
+  };
+}
+
+function readStoredSession(): WebSession | null {
+  try {
+    const value = window.localStorage.getItem(SESSION_STORAGE_KEY);
+    return value ? (JSON.parse(value) as WebSession) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredSession(session: WebSession | null) {
+  if (!session) {
+    window.localStorage.removeItem(SESSION_STORAGE_KEY);
+    return;
+  }
+
+  window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+}
+
 function getCurrentPath() {
   return `${window.location.pathname}${window.location.search}`;
 }
@@ -1128,6 +1596,41 @@ function Metric(props: { label: string; value: string }) {
       <strong>{props.value}</strong>
     </div>
   );
+}
+
+function getQueueStats(items: ProductQueueItem[], orders: Order[]) {
+  const soldProductIds = new Set(
+    items.filter((item) => item.product.queueStatus === "SOLD").map((item) => item.product.id)
+  );
+
+  return {
+    total: items.length,
+    queued: items.filter((item) => item.product.queueStatus === "QUEUED").length,
+    sold: soldProductIds.size,
+    revenue: orders
+      .filter((order) => soldProductIds.has(order.productId))
+      .reduce((sum, order) => sum + order.finalPrice, 0)
+  };
+}
+
+function getQueueStatusText(status: ProductQueueItem["product"]["queueStatus"]) {
+  if (status === "ACTIVE") {
+    return "竞拍中";
+  }
+
+  if (status === "SOLD") {
+    return "已成交";
+  }
+
+  if (status === "UNSOLD") {
+    return "已流拍";
+  }
+
+  if (status === "CANCELLED") {
+    return "已取消";
+  }
+
+  return "待竞拍";
 }
 
 function getStageLabel(status: AuctionStatus) {

@@ -94,6 +94,36 @@ button:disabled {
   margin-top: 22px;
 }
 
+.login-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.login-actions button,
+.route-error-actions button,
+.link-button,
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.link-button {
+  width: 100%;
+  margin-top: 12px;
+  border: 0;
+  color: var(--muted);
+  background: transparent;
+  font-weight: 800;
+}
+
+.icon-button {
+  width: 42px;
+  padding: 0;
+}
+
 .runtime-error pre {
   overflow: auto;
   margin: 18px 0 0;
@@ -352,6 +382,16 @@ h2 {
   color: var(--muted);
 }
 
+.product-ai-note {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  color: #334250;
+  background: #fff6f7;
+  line-height: 1.6;
+}
+
 .status-pill {
   color: #fff;
   background: #253545;
@@ -382,6 +422,17 @@ h2 {
   gap: 1px;
   overflow: hidden;
   margin-top: 16px;
+}
+
+.queue-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
 }
 
 .metric-card {
@@ -674,6 +725,141 @@ h2 {
   background: #fff1f3;
 }
 
+.hidden-file {
+  display: none;
+}
+
+.template-hint {
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.import-result {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #cfe5f7;
+  border-radius: 8px;
+  color: #24536f;
+  background: #eef8ff;
+  font-size: 13px;
+}
+
+.import-result span {
+  color: var(--muted);
+}
+
+.queue-focus {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.queue-focus > div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #eef2f5;
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.queue-focus span,
+.queue-row span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.queue-focus strong {
+  display: block;
+  overflow: hidden;
+  margin-top: 4px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.product-queue {
+  display: grid;
+  gap: 10px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.queue-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #eef2f5;
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.queue-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.queue-row-head strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-row p {
+  margin: 8px 0 0;
+  color: #334250;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.queue-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  color: #24536f;
+  background: #dff1ff;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.queue-active {
+  color: #fff;
+  background: var(--accent);
+}
+
+.queue-sold {
+  color: var(--green);
+  background: #e9f7f1;
+}
+
+.queue-unsold,
+.queue-cancelled {
+  color: #5b6874;
+  background: #edf1f4;
+}
+
+.queue-row-actions {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.queue-row-actions button {
+  width: 38px;
+  min-height: 38px;
+  padding: 0;
+}
+
 .order-box {
   display: grid;
   gap: 12px;
@@ -895,7 +1081,8 @@ h2 {
     grid-template-columns: 1fr;
   }
 
-  .stats-grid {
+  .stats-grid,
+  .queue-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -934,10 +1121,20 @@ h2 {
   }
 
   .stats-grid,
+  .queue-summary,
   .button-row,
   .ai-actions,
-  .demo-bid-grid {
+  .demo-bid-grid,
+  .queue-focus {
     grid-template-columns: 1fr;
+  }
+
+  .queue-row {
+    grid-template-columns: 1fr;
+  }
+
+  .queue-row-actions {
+    grid-template-columns: repeat(2, 38px);
   }
 
   .countdown {
