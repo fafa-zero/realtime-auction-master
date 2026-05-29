@@ -70,6 +70,8 @@ Page({
   data: {
     liveRoomId: "live-1",
     loading: false,
+    checkingLogin: true,
+    authorized: false,
     submitting: false,
     error: "",
     room: fallbackRoom,
@@ -101,8 +103,7 @@ Page({
 
   async onLoad(options) {
     const liveRoomId = options.liveRoomId || "live-1";
-    this.setData({ liveRoomId, loading: false, error: "" });
-    await this.ensurePageLogin();
+    this.setData({ liveRoomId, loading: false, checkingLogin: true, authorized: false, error: "" });
     this.applySnapshot({
       ...fallbackSnapshot,
       auction: { ...fallbackSnapshot.auction, liveRoomId },
@@ -113,6 +114,8 @@ Page({
   onShow() {
     this.ensurePageLogin()
       .then(() => {
+        clearInterval(this.clockTimer);
+        clearInterval(this.pollingTimer);
         this.load();
         this.clockTimer = setInterval(() => this.refreshComputed(), 500);
         this.pollingTimer = setInterval(() => this.loadSnapshot(), POLLING_INTERVAL_MS);
@@ -135,6 +138,10 @@ Page({
   },
 
   async load() {
+    if (!this.data.authorized) {
+      return;
+    }
+
     this.setData({ error: "" });
 
     try {
@@ -160,16 +167,32 @@ Page({
       await getApp().ensureLogin();
       const user = getApp().globalData.user;
       this.setData({
+        authorized: true,
+        checkingLogin: false,
         buyerText: user ? `当前买家：${user.nickname}` : "买家未登录"
       });
     } catch (error) {
+      this.closeRealtime();
+      clearInterval(this.clockTimer);
+      clearInterval(this.pollingTimer);
+      this.setData({
+        authorized: false,
+        checkingLogin: false,
+        error: "",
+        buyerText: "买家未登录"
+      });
+      wx.showToast({ title: "请先登录", icon: "none" });
       wx.redirectTo({ url: "/pages/index/index" });
       throw error;
     }
   },
 
+  goLogin() {
+    wx.redirectTo({ url: "/pages/index/index" });
+  },
+
   async loadSnapshot() {
-    if (this.data.loading || this.snapshotLoading) {
+    if (!this.data.authorized || this.data.loading || this.snapshotLoading) {
       return;
     }
 

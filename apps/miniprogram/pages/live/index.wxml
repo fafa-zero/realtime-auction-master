@@ -1,5 +1,11 @@
 <view class="page">
-  <view wx:if="{{loading}}" class="card muted">正在进入专场...</view>
+  <view wx:if="{{checkingLogin}}" class="card muted">正在校验买家登录...</view>
+  <view wx:elif="{{!authorized}}" class="card login-required">
+    <text class="section-title">请先登录</text>
+    <text class="muted">登录后才能查看好物专场和参与竞拍。</text>
+    <button class="primary" bindtap="goLogin">去登录</button>
+  </view>
+  <view wx:elif="{{loading}}" class="card muted">正在进入专场...</view>
   <view wx:elif="{{error}}" class="card error">{{error}}</view>
 
   <view wx:else>

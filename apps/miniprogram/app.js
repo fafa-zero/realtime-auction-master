@@ -1,6 +1,9 @@
 const { getDefaultApiBaseUrl, getMe, loginDemo } = require("./utils/api");
 
 const DEFAULT_API_BASE_URL = getDefaultApiBaseUrl();
+const TOKEN_STORAGE_KEY = "auction_token";
+const USER_STORAGE_KEY = "auction_user";
+const EXPLICIT_LOGIN_STORAGE_KEY = "auction_explicit_login";
 
 App({
   globalData: {
@@ -16,8 +19,13 @@ App({
   },
 
   restoreStoredSession() {
-    const storedToken = wx.getStorageSync("auction_token");
-    const storedUser = wx.getStorageSync("auction_user");
+    if (!wx.getStorageSync(EXPLICIT_LOGIN_STORAGE_KEY)) {
+      this.clearStoredSession();
+      return;
+    }
+
+    const storedToken = wx.getStorageSync(TOKEN_STORAGE_KEY);
+    const storedUser = wx.getStorageSync(USER_STORAGE_KEY);
 
     if (storedToken && storedUser) {
       this.globalData.token = storedToken;
@@ -26,21 +34,23 @@ App({
   },
 
   async ensureLogin() {
+    if (!wx.getStorageSync(EXPLICIT_LOGIN_STORAGE_KEY)) {
+      this.clearStoredSession();
+      throw new Error("请先登录后进入专场");
+    }
+
     if (this.globalData.token) {
       try {
         const result = await getMe();
         this.globalData.user = result.user;
         return this.globalData;
       } catch {
-        this.globalData.token = "";
-        this.globalData.user = null;
-        wx.removeStorageSync("auction_token");
-        wx.removeStorageSync("auction_user");
+        this.clearStoredSession();
       }
     }
 
-    const storedToken = wx.getStorageSync("auction_token");
-    const storedUser = wx.getStorageSync("auction_user");
+    const storedToken = wx.getStorageSync(TOKEN_STORAGE_KEY);
+    const storedUser = wx.getStorageSync(USER_STORAGE_KEY);
 
     if (storedToken && storedUser) {
       this.globalData.token = storedToken;
@@ -50,10 +60,7 @@ App({
         await getMe();
         return this.globalData;
       } catch {
-        this.globalData.token = "";
-        this.globalData.user = null;
-        wx.removeStorageSync("auction_token");
-        wx.removeStorageSync("auction_user");
+        this.clearStoredSession();
       }
     }
 
@@ -67,16 +74,22 @@ App({
 
     this.globalData.token = result.token;
     this.globalData.user = result.user;
-    wx.setStorageSync("auction_token", result.token);
-    wx.setStorageSync("auction_user", result.user);
+    wx.setStorageSync(EXPLICIT_LOGIN_STORAGE_KEY, "1");
+    wx.setStorageSync(TOKEN_STORAGE_KEY, result.token);
+    wx.setStorageSync(USER_STORAGE_KEY, result.user);
 
     return result;
   },
 
   logout() {
+    this.clearStoredSession();
+  },
+
+  clearStoredSession() {
     this.globalData.token = "";
     this.globalData.user = null;
-    wx.removeStorageSync("auction_token");
-    wx.removeStorageSync("auction_user");
+    wx.removeStorageSync(TOKEN_STORAGE_KEY);
+    wx.removeStorageSync(USER_STORAGE_KEY);
+    wx.removeStorageSync(EXPLICIT_LOGIN_STORAGE_KEY);
   }
 });
