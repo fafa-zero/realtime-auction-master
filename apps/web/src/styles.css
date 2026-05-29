@@ -826,6 +826,24 @@ h2 {
   white-space: nowrap;
 }
 
+.next-product-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 0 12px;
+  font-weight: 800;
+}
+
+.next-product-button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .product-queue {
   display: grid;
   gap: 10px;

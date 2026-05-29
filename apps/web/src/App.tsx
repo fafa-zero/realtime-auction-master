@@ -1164,6 +1164,14 @@ export function App() {
                   </div>
                 </div>
               ) : null}
+              <button
+                className="next-product-button"
+                disabled={!nextQueueItem || snapshot.auction.status === "ACTIVE"}
+                onClick={() => nextQueueItem && startProductFromQueue(nextQueueItem.product.id)}
+              >
+                <PlayCircle size={16} />
+                <span>{nextQueueItem ? `开始下一件：${nextQueueItem.product.name}` : "暂无下一件商品"}</span>
+              </button>
               {productQueue.length === 0 ? (
                 <p className="muted">暂无导入商品，可先上传固定模板。</p>
               ) : (

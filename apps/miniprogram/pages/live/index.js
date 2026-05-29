@@ -89,6 +89,9 @@ Page({
     hint: "开始后可参与",
     buyerText: "买家未登录",
     aiScriptText: "",
+    progressPercent: 0,
+    progressText: "0%",
+    ruleText: "起拍价 ¥0 / 最低加价 ¥0 / 封顶价 ¥0",
     realtimeText: "实时连接准备中",
     debugText: "",
     canBid: false
@@ -217,6 +220,10 @@ Page({
       snapshot.auction.status !== "ACTIVE" ||
       !Number.isFinite(currentBidPrice) ||
       currentBidPrice < nextBid;
+    const progressPercent =
+      snapshot.auction.ceilingPrice > 0
+        ? Math.min(100, Math.round((snapshot.auction.currentPrice / snapshot.auction.ceilingPrice) * 100))
+        : 0;
 
     this.setData({
       snapshot: { ...snapshot, product, bids },
@@ -230,7 +237,10 @@ Page({
       liveBadgeText: badgeMap[snapshot.auction.status] || snapshot.auction.status,
       leaderText: snapshot.auction.winnerNickname || "暂无领先用户",
       bidCountText: `${bids.length} 条记录`,
-      aiScriptText: product.aiScript ? product.aiScript.slice(0, 120) : "主播正在准备 AI 好物讲解"
+      aiScriptText: product.aiScript ? product.aiScript.slice(0, 120) : "主播正在准备 AI 好物讲解",
+      progressPercent,
+      progressText: `${progressPercent}%`,
+      ruleText: `起拍价 ${money(snapshot.auction.startPrice)} / 最低加价 ${money(snapshot.auction.incrementStep)} / 封顶价 ${money(snapshot.auction.ceilingPrice)}`
     });
     this.refreshComputed();
   },

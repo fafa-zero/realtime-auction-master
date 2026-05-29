@@ -53,6 +53,17 @@
       </view>
     </view>
 
+    <view class="card auction-progress">
+      <view class="bid-head">
+        <text class="section-title">竞拍进度</text>
+        <text class="status">{{progressText}}</text>
+      </view>
+      <view class="progress-track">
+        <view class="progress-fill" style="width: {{progressPercent}}%;"></view>
+      </view>
+      <text class="hint">{{ruleText}}</text>
+    </view>
+
     <view class="card">
       <view class="bid-head">
         <text class="section-title">我要参与</text>
