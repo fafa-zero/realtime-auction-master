@@ -2,7 +2,18 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { completeWithModel } from "./ai.js";
-import type { Auction, AuctionHistoryItem, AuctionSnapshot, Bid, LiveRoom, Order, Product, Session, User } from "./types.js";
+import type {
+  Auction,
+  AuctionHistoryItem,
+  AuctionSnapshot,
+  Bid,
+  LiveRoom,
+  Order,
+  Product,
+  ProductQueueStatus,
+  Session,
+  User
+} from "./types.js";
 
 const DATA_FILE = resolve(process.env.AUCTION_DATA_FILE ?? "data/auction-state.json");
 const DEFAULT_LIVE_ROOM_ID = "live-1";
@@ -68,12 +79,14 @@ const users: User[] = [];
 const sessions: Session[] = [];
 
 loadState();
+ensureDemoWebAccounts();
 rebuildProcessedBidRequestIds();
 
 export interface StartAuctionOptions {
   durationSeconds?: number;
   ceilingPrice?: number;
   incrementStep?: number;
+  productId?: string;
 }
 
 export interface LoginMiniprogramInput {
@@ -81,6 +94,27 @@ export interface LoginMiniprogramInput {
   mockCode?: string;
   nickname?: string;
   avatarUrl?: string;
+}
+
+export interface LoginWebInput {
+  account: string;
+  password: string;
+}
+
+export interface RegisterWebInput extends LoginWebInput {
+  nickname?: string;
+  role?: "BUYER" | "HOST" | "ADMIN";
+}
+
+export interface ProductImportRow {
+  name: string;
+  description: string;
+  startPrice: number;
+  incrementStep: number;
+  ceilingPrice: number;
+  durationSeconds: number;
+  sellingPoints?: string;
+  scriptKeywords?: string;
 }
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -104,7 +138,7 @@ export function getSnapshot(liveRoomId = DEFAULT_LIVE_ROOM_ID): AuctionSnapshot 
   const order = getCurrentOrder(auction.id);
 
   return {
-    product: { ...requireProduct(auction.productId) },
+    product: cloneProductWithQueueStatus(requireProduct(auction.productId), auction),
     auction: { ...auction },
     bids: auctionBids.slice(0, 30),
     order: order ? { ...order } : null,
@@ -193,6 +227,58 @@ export function loginMiniprogram(input: LoginMiniprogramInput) {
   };
 }
 
+export function registerWebUser(input: RegisterWebInput) {
+  const account = normalizeAccount(input.account);
+  const password = input.password.trim();
+
+  if (!password) {
+    throw new Error("密码不能为空");
+  }
+
+  if (users.some((item) => item.account === account)) {
+    throw new Error("账号已存在，请直接登录");
+  }
+
+  const user: User = {
+    id: `user-${randomUUID()}`,
+    account,
+    password,
+    nickname: input.nickname?.trim() || account,
+    avatarUrl: "",
+    role: input.role ?? "HOST",
+    createdAt: Date.now()
+  };
+
+  users.push(user);
+  saveState();
+
+  return sanitizeUser(user);
+}
+
+export function loginWebUser(input: LoginWebInput) {
+  const account = normalizeAccount(input.account);
+  const password = input.password.trim();
+  const user = users.find((item) => item.account === account);
+
+  if (!user) {
+    throw new Error("账号不存在，请先注册");
+  }
+
+  if (user.password !== password) {
+    throw new Error("账号或密码错误");
+  }
+
+  const session = createSession(user.id);
+  removeExpiredSessions();
+  saveState();
+
+  return {
+    token: session.token,
+    expiresAt: session.expiresAt,
+    user: sanitizeUser(user)
+  };
+}
+
 export function getUserByToken(token: string) {
   removeExpiredSessions();
   const session = sessions.find((item) => item.token === token);
@@ -224,10 +310,102 @@ export function updateUserProfileByToken(token: string, input: { nickname?: stri
   return sanitizeUser(user);
 }
 
+export function getProductQueue(liveRoomId = DEFAULT_LIVE_ROOM_ID) {
+  requireLiveRoom(liveRoomId);
+
+  return products
+    .filter((product) => getProductAuction(product.id, liveRoomId))
+    .map((product) => {
+      const auction = getProductAuction(product.id, liveRoomId);
+
+      if (!auction) {
+        throw new Error("商品竞拍配置不存在");
+      }
+
+      return {
+        product: cloneProductWithQueueStatus(product, auction),
+        auction: { ...auction }
+      };
+    })
+    .sort((a, b) => (a.product.importedAt ?? 0) - (b.product.importedAt ?? 0));
+}
+
+export function importAuctionProducts(liveRoomId: string, rows: ProductImportRow[]) {
+  const liveRoom = requireLiveRoom(liveRoomId);
+  const failedRows: Array<{ rowNumber: number; reason: string }> = [];
+  const imported: Product[] = [];
+
+  rows.forEach((row, index) => {
+    const rowNumber = index + 2;
+
+    try {
+      const normalized = normalizeProductImportRow(row);
+      const product: Product = {
+        id: `product-${randomUUID()}`,
+        liveRoomId,
+        imageUrl: "",
+        name: normalized.name,
+        description: normalized.description,
+        startPrice: normalized.startPrice,
+        incrementStep: normalized.incrementStep,
+        ceilingPrice: normalized.ceilingPrice,
+        durationSeconds: normalized.durationSeconds,
+        sellingPoints: normalized.sellingPoints,
+        scriptKeywords: normalized.scriptKeywords,
+        aiScript: buildLocalProductScript(liveRoom, normalized),
+        aiScriptUpdatedAt: Date.now(),
+        queueStatus: "QUEUED",
+        importedAt: Date.now() + index
+      };
+      const auction = createSeedAuction({
+        id: `auction-${randomUUID()}`,
+        liveRoomId,
+        productId: product.id,
+        startPrice: normalized.startPrice,
+        incrementStep: normalized.incrementStep,
+        ceilingPrice: normalized.ceilingPrice,
+        durationSeconds: normalized.durationSeconds
+      });
+
+      products.push(product);
+      auctions.push(auction);
+      imported.push(product);
+    } catch (error) {
+      failedRows.push({ rowNumber, reason: getErrorMessage(error) });
+    }
+  });
+
+  if (imported.length > 0 || failedRows.length > 0) {
+    saveState();
+  }
+
+  return {
+    ok: true,
+    importedCount: imported.length,
+    failedRows,
+    items: getProductQueue(liveRoomId)
+  };
+}
+
+export function startProductAuction(liveRoomId: string, productId: string) {
+  return startAuction(liveRoomId, { productId });
+}
+
 export function startAuction(liveRoomIdOrOptions: string | StartAuctionOptions = DEFAULT_LIVE_ROOM_ID, maybeOptions: StartAuctionOptions = {}) {
   const liveRoomId = typeof liveRoomIdOrOptions === "string" ? liveRoomIdOrOptions : DEFAULT_LIVE_ROOM_ID;
   const options = typeof liveRoomIdOrOptions === "string" ? maybeOptions : liveRoomIdOrOptions;
-  const auction = requireAuctionForLiveRoom(liveRoomId);
+  const liveRoom = requireLiveRoom(liveRoomId);
+  const currentAuction = requireAuction(liveRoom.currentAuctionId);
+  const auction = options.productId ? requireAuctionForProduct(liveRoomId, options.productId) : currentAuction;
+
+  if (currentAuction.id !== auction.id) {
+    if (currentAuction.status === "ACTIVE") {
+      throw new Error("当前竞拍进行中，结束后才能开始下一件");
+    }
+
+    archiveCurrentAuction(liveRoomId);
+    liveRoom.currentAuctionId = auction.id;
+  }
 
   if (auction.status !== "PENDING" && auction.status !== "UNSOLD" && auction.status !== "SOLD" && auction.status !== "CANCELLED") {
     throw new Error("当前专场状态不允许开始");
@@ -251,6 +429,8 @@ export function startAuction(liveRoomIdOrOptions: string | StartAuctionOptions =
     auction.ceilingPrice = options.ceilingPrice;
   }
 
+  syncAuctionConfigToProduct(auction);
+
   if (auction.ceilingPrice < auction.startPrice + auction.incrementStep) {
     throw new Error("封顶价必须高于最低参与金额");
   }
@@ -263,6 +443,7 @@ export function startAuction(liveRoomIdOrOptions: string | StartAuctionOptions =
   auction.winnerUserId = null;
   auction.winnerNickname = null;
   auction.version += 1;
+  setProductQueueStatus(auction.productId, "ACTIVE");
   saveState();
 
   return getSnapshot(liveRoomId);
@@ -279,6 +460,7 @@ export function cancelAuction(liveRoomIdOrReason = DEFAULT_LIVE_ROOM_ID, maybeRe
 
   auction.status = "CANCELLED";
   auction.version += 1;
+  setProductQueueStatus(auction.productId, "CANCELLED");
   archiveCurrentAuction(liveRoomId);
   saveState();
 
@@ -391,6 +573,7 @@ export function settleAuction(liveRoomId = DEFAULT_LIVE_ROOM_ID) {
 
   if (auction.winnerUserId && auction.winnerNickname) {
     auction.status = "SOLD";
+    setProductQueueStatus(auction.productId, "SOLD");
     const existingOrder = getCurrentOrder(auction.id);
 
     if (!existingOrder) {
@@ -407,6 +590,7 @@ export function settleAuction(liveRoomId = DEFAULT_LIVE_ROOM_ID) {
     }
   } else {
     auction.status = "UNSOLD";
+    setProductQueueStatus(auction.productId, "UNSOLD");
   }
 
   archiveCurrentAuction(liveRoomId);
@@ -436,18 +620,36 @@ export function payOrder(orderId: string) {
   return { ...order };
 }
 
-export async function generateProductScript(liveRoomId = DEFAULT_LIVE_ROOM_ID) {
+export async function generateProductScript(liveRoomId = DEFAULT_LIVE_ROOM_ID, productId?: string) {
   const liveRoom = requireLiveRoom(liveRoomId);
-  const auction = requireAuctionForLiveRoom(liveRoomId);
+  const auction = productId ? requireAuctionForProduct(liveRoomId, productId) : requireAuctionForLiveRoom(liveRoomId);
   const product = requireProduct(auction.productId);
-  const fallbackContent = `今晚${liveRoom.title}由${liveRoom.hostName}带来${product.name}竞拍，${auction.startPrice} 元起拍，每次最低加价 ${auction.incrementStep} 元，封顶价 ${auction.ceilingPrice} 元。喜欢的朋友可以关注当前最高价，把握出价时机。`;
+  const fallbackContent = buildLocalProductScript(liveRoom, {
+    name: product.name,
+    description: product.description,
+    startPrice: auction.startPrice,
+    incrementStep: auction.incrementStep,
+    ceilingPrice: auction.ceilingPrice,
+    durationSeconds: auction.durationSeconds,
+    sellingPoints: product.sellingPoints,
+    scriptKeywords: product.scriptKeywords
+  });
 
-  return completeWithModel({
+  const result = await completeWithModel({
     title: "AI 商品讲解词",
     systemPrompt: "你是直播电商主播助理，输出必须简洁、合规、自然，不得承诺保值、收益或绝对效果。",
-    userPrompt: `请生成 80 字以内直播讲解词。\n直播间：${liveRoom.title}\n主播：${liveRoom.hostName}\n商品名称：${product.name}\n商品描述：${product.description}\n起拍价：${auction.startPrice}\n最低加价：${auction.incrementStep}\n封顶价：${auction.ceilingPrice}\n竞拍时长：${auction.durationSeconds} 秒`,
+    userPrompt: `请生成 80 字以内直播讲解词。\n直播间：${liveRoom.title}\n主播：${liveRoom.hostName}\n商品名称：${product.name}\n商品描述：${product.description}\n商品卖点：${product.sellingPoints ?? "未填写"}\n讲解关键词：${product.scriptKeywords ?? "未填写"}\n起拍价：${auction.startPrice}\n最低加价：${auction.incrementStep}\n封顶价：${auction.ceilingPrice}\n竞拍时长：${auction.durationSeconds} 秒`,
     fallbackContent
   });
+
+  product.aiScript = result.content;
+  product.aiScriptUpdatedAt = result.generatedAt;
+  saveState();
+
+  return {
+    ...result,
+    product: cloneProductWithQueueStatus(product, auction)
+  };
 }
 
 export async function generateAuctionSummary(liveRoomId = DEFAULT_LIVE_ROOM_ID) {
@@ -520,6 +722,7 @@ function createSeedAuction(input: {
   id: string;
   liveRoomId: string;
   productId: string;
+  startPrice?: number;
   incrementStep: number;
   ceilingPrice: number;
   durationSeconds: number;
@@ -528,8 +731,8 @@ function createSeedAuction(input: {
     id: input.id,
     productId: input.productId,
     liveRoomId: input.liveRoomId,
-    startPrice: 0,
-    currentPrice: 0,
+    startPrice: input.startPrice ?? 0,
+    currentPrice: input.startPrice ?? 0,
     incrementStep: input.incrementStep,
     ceilingPrice: input.ceilingPrice,
     durationSeconds: input.durationSeconds,
@@ -585,7 +788,7 @@ function archiveCurrentAuction(liveRoomId: string) {
   }
 
   const historyItem: AuctionHistoryItem = {
-    product: { ...requireProduct(auction.productId) },
+    product: cloneProductWithQueueStatus(requireProduct(auction.productId), auction),
     auction: { ...auction },
     bids: getAuctionBids(auction.id),
     order: getCurrentOrder(auction.id),
@@ -617,6 +820,197 @@ function removeProcessedRequestsForAuction(auctionId: string) {
       processedBidRequestIds.delete(requestId);
     }
   }
+}
+
+function ensureDemoWebAccounts() {
+  const demoUsers: User[] = [
+    {
+      id: "user-demo-host",
+      account: "demo-host",
+      password: "demo123",
+      nickname: "演示主播",
+      avatarUrl: "",
+      role: "HOST",
+      createdAt: Date.now()
+    },
+    {
+      id: "user-demo-buyer",
+      account: "demo-buyer",
+      password: "demo123",
+      nickname: "Web 预览买家",
+      avatarUrl: "",
+      role: "BUYER",
+      createdAt: Date.now()
+    }
+  ];
+
+  for (const demoUser of demoUsers) {
+    if (!users.some((user) => user.account === demoUser.account || user.id === demoUser.id)) {
+      users.push(demoUser);
+    }
+  }
+}
+
+function createSession(userId: string): Session {
+  const session: Session = {
+    token: `sess-${randomUUID()}`,
+    userId,
+    expiresAt: Date.now() + SESSION_TTL_MS
+  };
+
+  sessions.push(session);
+  return session;
+}
+
+function normalizeAccount(account: string) {
+  const normalized = account.trim().toLowerCase();
+
+  if (!normalized) {
+    throw new Error("账号不能为空");
+  }
+
+  return normalized;
+}
+
+function normalizeProductImportRow(row: ProductImportRow): ProductImportRow {
+  const name = row.name.trim();
+  const description = row.description.trim();
+
+  if (!name) {
+    throw new Error("商品名称不能为空");
+  }
+
+  if (!description) {
+    throw new Error("商品描述不能为空");
+  }
+
+  const numbers = {
+    startPrice: row.startPrice,
+    incrementStep: row.incrementStep,
+    ceilingPrice: row.ceilingPrice,
+    durationSeconds: row.durationSeconds
+  };
+
+  for (const [field, value] of Object.entries(numbers)) {
+    if (!Number.isFinite(value) || !Number.isInteger(value)) {
+      throw new Error(`${getProductImportFieldLabel(field)}必须是整数`);
+    }
+  }
+
+  if (row.startPrice < 0) {
+    throw new Error("起拍价不能小于 0");
+  }
+
+  if (row.incrementStep < 1) {
+    throw new Error("最低加价不能小于 1");
+  }
+
+  if (row.ceilingPrice < row.startPrice + row.incrementStep) {
+    throw new Error("封顶价必须高于最低参与金额");
+  }
+
+  if (row.durationSeconds < 15 || row.durationSeconds > 600) {
+    throw new Error("竞拍时长秒必须在 15 到 600 之间");
+  }
+
+  return {
+    name,
+    description,
+    startPrice: row.startPrice,
+    incrementStep: row.incrementStep,
+    ceilingPrice: row.ceilingPrice,
+    durationSeconds: row.durationSeconds,
+    sellingPoints: row.sellingPoints?.trim(),
+    scriptKeywords: row.scriptKeywords?.trim()
+  };
+}
+
+function getProductImportFieldLabel(field: string) {
+  return (
+    {
+      startPrice: "起拍价",
+      incrementStep: "最低加价",
+      ceilingPrice: "封顶价",
+      durationSeconds: "竞拍时长秒"
+    }[field] ?? field
+  );
+}
+
+function buildLocalProductScript(liveRoom: LiveRoom, row: ProductImportRow) {
+  const sellingPoints = row.sellingPoints ? `核心卖点是${row.sellingPoints}，` : "";
+  const keywords = row.scriptKeywords ? `讲解时可以突出${row.scriptKeywords}。` : "适合在直播间重点展示细节和使用场景。";
+
+  return `${liveRoom.hostName}为大家带来${row.name}，${sellingPoints}${row.startPrice} 元起拍，每次最低加价 ${row.incrementStep} 元，封顶价 ${row.ceilingPrice} 元，竞拍时长 ${row.durationSeconds} 秒。${keywords}`;
+}
+
+function cloneProductWithQueueStatus(product: Product, auction: Auction): Product {
+  return {
+    ...product,
+    startPrice: product.startPrice ?? auction.startPrice,
+    incrementStep: product.incrementStep ?? auction.incrementStep,
+    ceilingPrice: product.ceilingPrice ?? auction.ceilingPrice,
+    durationSeconds: product.durationSeconds ?? auction.durationSeconds,
+    queueStatus: deriveProductQueueStatus(product, auction)
+  };
+}
+
+function deriveProductQueueStatus(product: Product, auction: Auction): ProductQueueStatus {
+  if (auction.status === "ACTIVE") {
+    return "ACTIVE";
+  }
+
+  if (auction.status === "SOLD") {
+    return "SOLD";
+  }
+
+  if (auction.status === "UNSOLD") {
+    return "UNSOLD";
+  }
+
+  if (auction.status === "CANCELLED") {
+    return "CANCELLED";
+  }
+
+  return product.queueStatus ?? "QUEUED";
+}
+
+function getProductAuction(productId: string, liveRoomId: string) {
+  return auctions.find((auction) => auction.productId === productId && auction.liveRoomId === liveRoomId);
+}
+
+function requireAuctionForProduct(liveRoomId: string, productId: string) {
+  requireLiveRoom(liveRoomId);
+  requireProduct(productId);
+  const auction = getProductAuction(productId, liveRoomId);
+
+  if (!auction) {
+    throw new Error("商品竞拍配置不存在");
+  }
+
+  return auction;
+}
+
+function syncAuctionConfigToProduct(auction: Auction) {
+  const product = requireProduct(auction.productId);
+
+  product.liveRoomId = product.liveRoomId ?? auction.liveRoomId;
+  product.startPrice = auction.startPrice;
+  product.incrementStep = auction.incrementStep;
+  product.ceilingPrice = auction.ceilingPrice;
+  product.durationSeconds = auction.durationSeconds;
+}
+
+function setProductQueueStatus(productId: string, status: ProductQueueStatus) {
+  const product = requireProduct(productId);
+  product.queueStatus = status;
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "导入失败";
 }
 
 function saveState() {
@@ -730,6 +1124,7 @@ function cloneHistoryItem(item: AuctionHistoryItem) {
 function sanitizeUser(user: User) {
   return {
     id: user.id,
+    account: user.account,
     nickname: user.nickname,
     avatarUrl: user.avatarUrl,
     role: user.role,

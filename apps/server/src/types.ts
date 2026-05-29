@@ -1,10 +1,22 @@
 export type AuctionStatus = "PENDING" | "ACTIVE" | "SOLD" | "UNSOLD" | "CANCELLED";
+export type ProductQueueStatus = "QUEUED" | "ACTIVE" | "SOLD" | "UNSOLD" | "CANCELLED";
 
 export interface Product {
   id: string;
   name: string;
   imageUrl: string;
   description: string;
+  liveRoomId?: string;
+  startPrice?: number;
+  incrementStep?: number;
+  ceilingPrice?: number;
+  durationSeconds?: number;
+  sellingPoints?: string;
+  scriptKeywords?: string;
+  aiScript?: string;
+  aiScriptUpdatedAt?: number;
+  queueStatus?: ProductQueueStatus;
+  importedAt?: number;
 }
 
 export interface LiveRoom {
@@ -18,7 +30,9 @@ export interface LiveRoom {
 
 export interface User {
   id: string;
-  openId: string;
+  openId?: string;
+  account?: string;
+  password?: string;
   nickname: string;
   avatarUrl: string;
   role: "BUYER" | "HOST" | "ADMIN";

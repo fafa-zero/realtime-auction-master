@@ -18,14 +18,21 @@ import {
   getOrder,
   getOrders,
   getOrdersForUser,
+  getProductQueue,
   getUserByToken,
+  importAuctionProducts,
   loginMiniprogram,
+  loginWebUser,
   payOrder,
   placeBid,
+  registerWebUser,
   settleAuction,
   startAuction,
+  startProductAuction,
   updateUserProfileByToken
 } from "./store.js";
+import type { ProductImportRow } from "./store.js";
+import { parseSpreadsheet, type SpreadsheetRecord } from "./spreadsheet.js";
 
 const PORT = Number(process.env.PORT ?? 4200);
 const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5174";
@@ -89,6 +96,36 @@ app.post("/api/auth/miniprogram/login", (req, res) => {
     res.json({ ok: true, ...result });
   } catch (error) {
     res.status(400).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
+app.post("/api/auth/web/register", (req, res) => {
+  try {
+    const schema = z.object({
+      account: z.string().min(1, "账号不能为空").max(80, "账号不能超过 80 个字符"),
+      password: z.string().min(1, "密码不能为空").max(80, "密码不能超过 80 个字符"),
+      nickname: z.string().min(1).max(40).optional(),
+      role: z.enum(["BUYER", "HOST", "ADMIN"]).optional()
+    });
+    const input = schema.parse(req.body ?? {});
+    const user = registerWebUser(input);
+    res.json({ ok: true, user });
+  } catch (error) {
+    res.status(400).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
+app.post("/api/auth/web/login", (req, res) => {
+  try {
+    const schema = z.object({
+      account: z.string().min(1, "账号不能为空").max(80, "账号不能超过 80 个字符"),
+      password: z.string().min(1, "密码不能为空").max(80, "密码不能超过 80 个字符")
+    });
+    const input = schema.parse(req.body ?? {});
+    const result = loginWebUser(input);
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    res.status(401).json({ ok: false, message: getErrorMessage(error) });
   }
 });
 
@@ -169,6 +206,51 @@ app.get("/api/live-rooms/:liveRoomId/auction", (req, res) => {
     res.json(getSnapshot(req.params.liveRoomId));
   } catch (error) {
     res.status(404).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
+app.get("/api/live-rooms/:liveRoomId/products", (req, res) => {
+  try {
+    assertLiveRoom(req.params.liveRoomId);
+    res.json({
+      ok: true,
+      items: getProductQueue(req.params.liveRoomId)
+    });
+  } catch (error) {
+    res.status(404).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
+app.post("/api/live-rooms/:liveRoomId/products/import", async (req, res) => {
+  try {
+    assertLiveRoom(req.params.liveRoomId);
+    const records = Array.isArray(req.body?.rows)
+      ? (req.body.rows as SpreadsheetRecord[])
+      : parseSpreadsheetFromUpload(await readUpload(req), req.headers["content-type"]);
+    const result = importAuctionProducts(req.params.liveRoomId, records.map(recordToProductImportRow));
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
+app.post("/api/live-rooms/:liveRoomId/products/:productId/start", (req, res) => {
+  try {
+    assertLiveRoom(req.params.liveRoomId);
+    const snapshot = startProductAuction(req.params.liveRoomId, req.params.productId);
+    broadcastAuctionEvent(req.params.liveRoomId, "auction:started", snapshot);
+    res.json(snapshot);
+  } catch (error) {
+    res.status(400).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
+app.post("/api/live-rooms/:liveRoomId/products/:productId/ai-script", async (req, res) => {
+  try {
+    assertLiveRoom(req.params.liveRoomId);
+    res.json(await generateProductScript(req.params.liveRoomId, req.params.productId));
+  } catch (error) {
+    res.status(400).json(createAiErrorResponse(getErrorMessage(error)));
   }
 });
 
@@ -345,7 +427,8 @@ app.post("/api/orders/:orderId/pay", (req, res) => {
 
 app.post("/api/ai/product-script", async (req, res) => {
   const liveRoomId = getLiveRoomIdFromRequest(req.body);
-  res.json(await generateProductScript(liveRoomId));
+  const productId = getProductIdFromRequest(req.body);
+  res.json(await generateProductScript(liveRoomId, productId));
 });
 
 app.post("/api/ai/auction-summary", async (req, res) => {
@@ -614,6 +697,104 @@ function assertLiveRoom(liveRoomId: string) {
 function getLiveRoomIdFromRequest(body: unknown) {
   const result = z.object({ liveRoomId: z.string().min(1).optional() }).safeParse(body);
   return result.success ? result.data.liveRoomId : undefined;
+}
+
+function getProductIdFromRequest(body: unknown) {
+  const result = z.object({ productId: z.string().min(1).optional() }).safeParse(body);
+  return result.success ? result.data.productId : undefined;
+}
+
+async function readUpload(req: express.Request) {
+  const chunks: Buffer[] = [];
+
+  for await (const chunk of req) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+
+  return Buffer.concat(chunks);
+}
+
+function parseSpreadsheetFromUpload(buffer: Buffer, contentTypeHeader: string | string[] | undefined) {
+  if (buffer.length === 0) {
+    throw new Error("请上传固定模板 Excel 文件");
+  }
+
+  const contentType = Array.isArray(contentTypeHeader) ? contentTypeHeader[0] : contentTypeHeader ?? "";
+
+  if (!contentType.startsWith("multipart/form-data")) {
+    return parseSpreadsheet(buffer);
+  }
+
+  const boundary = contentType.match(/boundary="?([^";]+)"?/i)?.[1];
+
+  if (!boundary) {
+    throw new Error("上传表单缺少 boundary");
+  }
+
+  const file = extractMultipartFile(buffer, boundary);
+  return parseSpreadsheet(file.buffer, file.filename);
+}
+
+function extractMultipartFile(buffer: Buffer, boundary: string) {
+  const body = buffer.toString("latin1");
+  const parts = body.split(`--${boundary}`);
+
+  for (const part of parts) {
+    if (!part.includes("filename=")) {
+      continue;
+    }
+
+    const headerEnd = part.indexOf("\r\n\r\n");
+
+    if (headerEnd < 0) {
+      continue;
+    }
+
+    const headers = part.slice(0, headerEnd);
+    const filename = headers.match(/filename="([^"]*)"/)?.[1] ?? "products.xlsx";
+    let content = part.slice(headerEnd + 4);
+
+    if (content.endsWith("\r\n")) {
+      content = content.slice(0, -2);
+    }
+
+    return {
+      filename,
+      buffer: Buffer.from(content, "latin1")
+    };
+  }
+
+  throw new Error("上传表单中没有找到文件");
+}
+
+function recordToProductImportRow(record: SpreadsheetRecord): ProductImportRow {
+  return {
+    name: getRecordValue(record, "商品名称"),
+    description: getRecordValue(record, "商品描述"),
+    startPrice: parseImportNumber(getRecordValue(record, "起拍价")),
+    incrementStep: parseImportNumber(getRecordValue(record, "最低加价")),
+    ceilingPrice: parseImportNumber(getRecordValue(record, "封顶价")),
+    durationSeconds: parseImportNumber(getRecordValue(record, "竞拍时长秒", "竞拍时长")),
+    sellingPoints: getRecordValue(record, "商品卖点"),
+    scriptKeywords: getRecordValue(record, "讲解关键词")
+  };
+}
+
+function getRecordValue(record: SpreadsheetRecord, ...keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+
+    if (value !== undefined) {
+      return String(value).trim();
+    }
+  }
+
+  return "";
+}
+
+function parseImportNumber(value: string) {
+  const normalized = value.replace(/[,\s￥¥]/g, "");
+  return Number(normalized);
 }
 
 function getAuthToken(req: express.Request) {
