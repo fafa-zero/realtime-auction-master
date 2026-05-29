@@ -803,6 +803,30 @@ h2 {
   color: var(--muted);
 }
 
+.next-confirm {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid #ffd18a;
+  border-radius: 8px;
+  background: #fff8e6;
+}
+
+.next-confirm span {
+  color: #714a00;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.next-confirm strong {
+  color: var(--ink);
+}
+
+.next-confirm button {
+  margin-top: 2px;
+}
+
 .queue-focus {
   display: grid;
   grid-template-columns: 1fr 1fr;

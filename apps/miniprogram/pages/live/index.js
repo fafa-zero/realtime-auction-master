@@ -90,6 +90,7 @@ Page({
     hint: "开始后可参与",
     buyerText: "买家未登录",
     aiScriptText: "",
+    productStateText: "等待主播开始竞拍",
     progressPercent: 0,
     progressText: "0%",
     ruleText: "起拍价 ¥0 / 最低加价 ¥0 / 封顶价 ¥0",
@@ -240,11 +241,32 @@ Page({
       leaderText: snapshot.auction.winnerNickname || "暂无领先用户",
       bidCountText: `${bids.length} 条记录`,
       aiScriptText: product.aiScript ? product.aiScript.slice(0, 120) : "主播正在准备 AI 好物讲解",
+      productStateText: this.getProductStateText(snapshot),
       progressPercent,
       progressText: `${progressPercent}%`,
       ruleText: `起拍价 ${money(snapshot.auction.startPrice)} / 最低加价 ${money(snapshot.auction.incrementStep)} / 封顶价 ${money(snapshot.auction.ceilingPrice)}`
     });
     this.refreshComputed();
+  },
+
+  getProductStateText(snapshot) {
+    if (snapshot.auction.status === "ACTIVE") {
+      return `正在竞拍，当前最低可参与 ${money(snapshot.auction.currentPrice + snapshot.auction.incrementStep)}`;
+    }
+
+    if (snapshot.auction.status === "SOLD" && snapshot.order) {
+      return `已成交，买家 ${snapshot.order.buyerNickname}，等待主播确认下一件`;
+    }
+
+    if (snapshot.auction.status === "UNSOLD") {
+      return "本件已流拍，等待主播确认下一件";
+    }
+
+    if (snapshot.auction.status === "CANCELLED") {
+      return "本件已取消，等待主播确认下一件";
+    }
+
+    return "等待主播开始竞拍";
   },
 
   resolveProductImageUrl(product) {

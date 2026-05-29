@@ -87,6 +87,16 @@
   font-weight: 900;
 }
 
+.product-state {
+  padding: 14rpx 16rpx;
+  border-left: 6rpx solid #d82f44;
+  border-radius: 8rpx;
+  background: #fff6f7;
+  color: #334250;
+  font-size: 24rpx;
+  line-height: 1.55;
+}
+
 .stats {
   display: grid;
   grid-template-columns: 1fr 1fr;

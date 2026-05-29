@@ -20,6 +20,7 @@
       <text class="product-name">{{snapshot.product.name}}</text>
       <text class="muted">{{snapshot.product.description}}</text>
       <text class="stock">{{stockText}}</text>
+      <text class="product-state">{{productStateText}}</text>
     </view>
 
     <view class="card ai-script">

@@ -428,6 +428,12 @@ export function App() {
     productQueue.find((item) => item.product.queueStatus === "QUEUED") ??
     productQueue.find((item) => item.auction.status === "PENDING") ??
     null;
+  const awaitingNextProduct = Boolean(
+    viewMode === "host" &&
+      snapshot &&
+      ["SOLD", "UNSOLD", "CANCELLED"].includes(snapshot.auction.status) &&
+      nextQueueItem
+  );
 
   async function handleDemoLogin(role: "HOST" | "BUYER") {
     setAuthMessage("正在登录演示账号...");
@@ -1169,6 +1175,19 @@ export function App() {
                 <Package size={18} />
                 <h2>竞拍商品队列</h2>
               </div>
+              {awaitingNextProduct ? (
+                <div className="next-confirm">
+                  <span>当前商品已结束，等待确认下一件</span>
+                  <strong>{nextQueueItem?.product.name}</strong>
+                  <button
+                    className="primary-button"
+                    onClick={() => nextQueueItem && startProductFromQueue(nextQueueItem.product.id)}
+                  >
+                    <PlayCircle size={16} />
+                    <span>确认开始下一件</span>
+                  </button>
+                </div>
+              ) : null}
               {currentQueueItem || nextQueueItem ? (
                 <div className="queue-focus">
                   <div>
