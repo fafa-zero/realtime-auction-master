@@ -34,6 +34,7 @@ import type {
   AuthUser,
   LiveRoom,
   Order,
+  BidRisk,
   ProductQueueItem
 } from "./types";
 
@@ -637,7 +638,7 @@ export function App() {
         price: input.price,
         clientRequestId: `${input.userId}-${Date.now()}-${Math.random().toString(16).slice(2)}`
       },
-      (response: { ok: boolean; message?: string }) => {
+      (response: { ok: boolean; message?: string; risk?: BidRisk }) => {
         input.onDone?.();
 
         if (!response.ok) {
@@ -645,7 +646,11 @@ export function App() {
           return;
         }
 
-        setMessage(`${input.nickname} 出价 ${formatMoney(input.price)}，等待广播同步`);
+        setMessage(
+          response.risk
+            ? `${input.nickname} 出价 ${formatMoney(input.price)}，风控提示：${response.risk.reasons.join("；")}`
+            : `${input.nickname} 出价 ${formatMoney(input.price)}，等待广播同步`
+        );
       }
     );
   }
@@ -1075,9 +1080,16 @@ export function App() {
           {lastBid ? (
             <div className="latest-bid">
               <span>最新出价</span>
-              <strong>
-                {lastBid.nickname} / {formatMoney(lastBid.price)}
-              </strong>
+              <div>
+                <strong>
+                  {lastBid.nickname} / {formatMoney(lastBid.price)}
+                </strong>
+                {lastBid.risk ? (
+                  <small className={`bid-risk bid-risk-${getBidRiskClass(lastBid.risk)}`}>
+                    风控{getBidRiskText(lastBid.risk)}：{lastBid.risk.reasons.join("；")}
+                  </small>
+                ) : null}
+              </div>
             </div>
           ) : null}
         </section>
@@ -1446,6 +1458,11 @@ export function App() {
                       <Clock3 size={13} />
                       {formatTime(bid.createdAt)}
                     </small>
+                    {bid.risk ? (
+                      <small className={`bid-risk bid-risk-${getBidRiskClass(bid.risk)}`}>
+                        风控{getBidRiskText(bid.risk)}：{bid.risk.reasons.join("；")}
+                      </small>
+                    ) : null}
                   </div>
                   <strong>{formatMoney(bid.price)}</strong>
                 </div>
@@ -1960,6 +1977,30 @@ function getRiskClass(level: string) {
   }
 
   return "low";
+}
+
+function getBidRiskClass(risk: BidRisk) {
+  if (risk.level === "HIGH") {
+    return "high";
+  }
+
+  if (risk.level === "MEDIUM") {
+    return "medium";
+  }
+
+  return "low";
+}
+
+function getBidRiskText(risk: BidRisk) {
+  if (risk.action === "BLOCK") {
+    return "拦截";
+  }
+
+  if (risk.action === "REVIEW") {
+    return "关注";
+  }
+
+  return "正常";
 }
 
 function formatMoney(value: number) {

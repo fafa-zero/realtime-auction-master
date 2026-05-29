@@ -12,7 +12,8 @@ import type {
   Product,
   ProductQueueStatus,
   Session,
-  User
+  User,
+  BidRisk
 } from "./types.js";
 
 const DATA_FILE = resolve(process.env.AUCTION_DATA_FILE ?? "data/auction-state.json");
@@ -122,6 +123,12 @@ export interface ProductImportRow {
 }
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const RISK_RECENT_WINDOW_MS = 20_000;
+const RISK_PENDING_ORDER_LIMIT = 2;
+const RISK_HIGH_FREQUENCY_BID_LIMIT = 5;
+const RISK_REPEAT_BID_LIMIT = 3;
+const RISK_LARGE_JUMP_MULTIPLIER = 5;
+const RISK_EXTREME_JUMP_MULTIPLIER = 10;
 
 export function getLiveRooms() {
   return liveRooms.map((room) => enrichLiveRoom(room));
@@ -531,6 +538,18 @@ export function placeBid(input: {
     throw new Error(`金额不能超过封顶价 ${auction.ceilingPrice} 元`);
   }
 
+  const risk = assessBidRisk({
+    liveRoomId,
+    auction,
+    userId: input.userId,
+    price: input.price,
+    now
+  });
+
+  if (risk.action === "BLOCK") {
+    throw new Error(`出价已被风控拦截：${risk.reasons.join("；")}`);
+  }
+
   const bid: Bid = {
     id: randomUUID(),
     auctionId: auction.id,
@@ -538,7 +557,8 @@ export function placeBid(input: {
     nickname: input.nickname,
     price: input.price,
     createdAt: now,
-    clientRequestId: input.clientRequestId
+    clientRequestId: input.clientRequestId,
+    risk: risk.level === "LOW" ? undefined : risk
   };
 
   bids.push(bid);
@@ -842,6 +862,77 @@ function removeProcessedRequestsForAuction(auctionId: string) {
       processedBidRequestIds.delete(requestId);
     }
   }
+}
+
+function assessBidRisk(input: {
+  liveRoomId: string;
+  auction: Auction;
+  userId: string;
+  price: number;
+  now: number;
+}): BidRisk {
+  const auctionBids = bids.filter((bid) => bid.auctionId === input.auction.id);
+  const userBids = auctionBids.filter((bid) => bid.userId === input.userId);
+  const recentUserBids = userBids.filter((bid) => input.now - bid.createdAt <= RISK_RECENT_WINDOW_MS);
+  const pendingOrders = getOrdersForUser(input.userId, input.liveRoomId).filter((order) => order.status !== "PAID");
+  const jumpAmount = input.price - input.auction.currentPrice;
+  const remainingSeconds = input.auction.endTime
+    ? Math.ceil((input.auction.endTime - input.now) / 1000)
+    : Number.POSITIVE_INFINITY;
+  const reachesCeiling = input.price >= input.auction.ceilingPrice;
+  const inFinalWindow = remainingSeconds <= input.auction.extendThresholdSeconds;
+  const reasons: string[] = [];
+
+  if (recentUserBids.length >= RISK_HIGH_FREQUENCY_BID_LIMIT) {
+    reasons.push(`${Math.round(RISK_RECENT_WINDOW_MS / 1000)} 秒内出价超过 ${RISK_HIGH_FREQUENCY_BID_LIMIT} 次`);
+  }
+
+  if (pendingOrders.length >= RISK_PENDING_ORDER_LIMIT) {
+    reasons.push(`该用户有 ${pendingOrders.length} 笔待支付订单`);
+  }
+
+  if (
+    recentUserBids.length >= RISK_REPEAT_BID_LIMIT &&
+    jumpAmount >= input.auction.incrementStep * RISK_EXTREME_JUMP_MULTIPLIER
+  ) {
+    reasons.push("连续出价后出现异常大幅加价");
+  }
+
+  if (reasons.length > 0) {
+    return {
+      level: "HIGH",
+      action: "BLOCK",
+      reasons
+    };
+  }
+
+  if (jumpAmount >= input.auction.incrementStep * RISK_LARGE_JUMP_MULTIPLIER) {
+    reasons.push("本次加价幅度明显高于最低加价要求");
+  }
+
+  if (reachesCeiling && inFinalWindow) {
+    reasons.push("临近结束直接达到封顶价，建议主播关注身份和支付意愿");
+  } else if (reachesCeiling) {
+    reasons.push("本次出价达到封顶价，会立即触发成交");
+  }
+
+  if (recentUserBids.length >= RISK_REPEAT_BID_LIMIT) {
+    reasons.push("该用户短时间内连续出价，建议关注是否恶意抬价");
+  }
+
+  if (reasons.length > 0) {
+    return {
+      level: "MEDIUM",
+      action: "REVIEW",
+      reasons
+    };
+  }
+
+  return {
+    level: "LOW",
+    action: "ALLOW",
+    reasons: []
+  };
 }
 
 function ensureDemoWebAccounts() {

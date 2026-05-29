@@ -37,6 +37,13 @@ export interface Bid {
   price: number;
   createdAt: number;
   clientRequestId: string;
+  risk?: BidRisk;
+}
+
+export interface BidRisk {
+  level: "LOW" | "MEDIUM" | "HIGH";
+  action: "ALLOW" | "REVIEW" | "BLOCK";
+  reasons: string[];
 }
 
 export interface Order {

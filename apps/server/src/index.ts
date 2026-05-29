@@ -413,6 +413,7 @@ function handlePlaceBid(body: unknown, liveRoomId: string, res: express.Response
       extended: result.extended,
       settled: result.settled,
       duplicate: result.duplicate,
+      risk: result.bid.risk,
       snapshot: result.snapshot
     });
   } catch (error) {
@@ -517,7 +518,7 @@ io.on("connection", (socket) => {
         broadcastAuctionEvent(result.snapshot.auction.liveRoomId, "auction:ended", result.snapshot);
       }
 
-      callback?.({ ok: true, bid: result.bid });
+      callback?.({ ok: true, bid: result.bid, risk: result.bid.risk });
     } catch (error) {
       callback?.({ ok: false, message: getErrorMessage(error) });
     }
@@ -608,7 +609,8 @@ miniprogramWss.on("connection", (ws) => {
         sendMiniprogramEvent(ws, "auction:bid-ack", {
           ok: true,
           bid: result.bid,
-          duplicate: result.duplicate
+          duplicate: result.duplicate,
+          risk: result.bid.risk
         });
         return;
       }

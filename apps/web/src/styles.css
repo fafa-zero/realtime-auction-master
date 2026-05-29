@@ -630,6 +630,13 @@ h2 {
   text-align: right;
 }
 
+.latest-bid div {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  min-width: 0;
+}
+
 .field {
   display: grid;
   gap: 6px;
@@ -1137,6 +1144,35 @@ h2 {
   gap: 4px;
   margin-top: 4px;
   color: var(--muted);
+}
+
+.bid-row .bid-risk,
+.latest-bid .bid-risk {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.4;
+  white-space: normal;
+}
+
+.bid-risk-medium {
+  color: #98690c;
+  background: #fff4d7;
+}
+
+.bid-risk-high {
+  color: var(--accent-dark);
+  background: #fff1f3;
+}
+
+.bid-risk-low {
+  color: var(--green);
+  background: #e9f7f1;
 }
 
 .bid-row strong {
