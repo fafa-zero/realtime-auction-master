@@ -23,13 +23,15 @@ const products: Product[] = [
     id: "product-1",
     name: "天然翡翠吊坠",
     imageUrl: "/static/jewelry.jpg",
-    description: "好物专场演示商品，适合用于演示实时互动、价格更新和订单确认流程。"
+    description: "好物专场演示商品，适合用于演示实时互动、价格更新和订单确认流程。",
+    stock: 1
   },
   {
     id: "product-2",
     name: "复古机械腕表",
     imageUrl: "/static/watch.jpg",
-    description: "第二个好物专场演示商品，用于验证多专场状态隔离和用户入口切换。"
+    description: "第二个好物专场演示商品，用于验证多专场状态隔离和用户入口切换。",
+    stock: 1
   }
 ];
 
@@ -113,6 +115,7 @@ export interface ProductImportRow {
   incrementStep: number;
   ceilingPrice: number;
   durationSeconds: number;
+  stock?: number;
   sellingPoints?: string;
   scriptKeywords?: string;
 }
@@ -350,6 +353,7 @@ export function importAuctionProducts(liveRoomId: string, rows: ProductImportRow
         incrementStep: normalized.incrementStep,
         ceilingPrice: normalized.ceilingPrice,
         durationSeconds: normalized.durationSeconds,
+        stock: normalized.stock,
         sellingPoints: normalized.sellingPoints,
         scriptKeywords: normalized.scriptKeywords,
         aiScript: buildLocalProductScript(liveRoom, normalized),
@@ -577,6 +581,7 @@ export function settleAuction(liveRoomId = DEFAULT_LIVE_ROOM_ID) {
     const existingOrder = getCurrentOrder(auction.id);
 
     if (!existingOrder) {
+      decreaseProductStock(auction.productId);
       orders.push({
         id: randomUUID(),
         auctionId: auction.id,
@@ -631,6 +636,7 @@ export async function generateProductScript(liveRoomId = DEFAULT_LIVE_ROOM_ID, p
     incrementStep: auction.incrementStep,
     ceilingPrice: auction.ceilingPrice,
     durationSeconds: auction.durationSeconds,
+    stock: product.stock ?? 1,
     sellingPoints: product.sellingPoints,
     scriptKeywords: product.scriptKeywords
   });
@@ -638,7 +644,7 @@ export async function generateProductScript(liveRoomId = DEFAULT_LIVE_ROOM_ID, p
   const result = await completeWithModel({
     title: "AI 商品讲解词",
     systemPrompt: "你是直播电商主播助理，输出必须简洁、合规、自然，不得承诺保值、收益或绝对效果。",
-    userPrompt: `请生成 80 字以内直播讲解词。\n直播间：${liveRoom.title}\n主播：${liveRoom.hostName}\n商品名称：${product.name}\n商品描述：${product.description}\n商品卖点：${product.sellingPoints ?? "未填写"}\n讲解关键词：${product.scriptKeywords ?? "未填写"}\n起拍价：${auction.startPrice}\n最低加价：${auction.incrementStep}\n封顶价：${auction.ceilingPrice}\n竞拍时长：${auction.durationSeconds} 秒`,
+    userPrompt: `请生成 80 字以内直播讲解词。\n直播间：${liveRoom.title}\n主播：${liveRoom.hostName}\n商品名称：${product.name}\n商品描述：${product.description}\n商品卖点：${product.sellingPoints ?? "未填写"}\n讲解关键词：${product.scriptKeywords ?? "未填写"}\n起拍价：${auction.startPrice}\n最低加价：${auction.incrementStep}\n封顶价：${auction.ceilingPrice}\n竞拍时长：${auction.durationSeconds} 秒\n库存：${product.stock ?? 1} 件`,
     fallbackContent
   });
 
@@ -888,7 +894,8 @@ function normalizeProductImportRow(row: ProductImportRow): ProductImportRow {
     startPrice: row.startPrice,
     incrementStep: row.incrementStep,
     ceilingPrice: row.ceilingPrice,
-    durationSeconds: row.durationSeconds
+    durationSeconds: row.durationSeconds,
+    stock: row.stock ?? 1
   };
 
   for (const [field, value] of Object.entries(numbers)) {
@@ -913,6 +920,11 @@ function normalizeProductImportRow(row: ProductImportRow): ProductImportRow {
     throw new Error("竞拍时长秒必须在 15 到 600 之间");
   }
 
+  const stock = row.stock ?? 1;
+  if (stock < 1 || stock > 100_000) {
+    throw new Error("库存必须在 1 到 100000 之间");
+  }
+
   return {
     name,
     description,
@@ -920,6 +932,7 @@ function normalizeProductImportRow(row: ProductImportRow): ProductImportRow {
     incrementStep: row.incrementStep,
     ceilingPrice: row.ceilingPrice,
     durationSeconds: row.durationSeconds,
+    stock,
     sellingPoints: row.sellingPoints?.trim(),
     scriptKeywords: row.scriptKeywords?.trim()
   };
@@ -931,7 +944,8 @@ function getProductImportFieldLabel(field: string) {
       startPrice: "起拍价",
       incrementStep: "最低加价",
       ceilingPrice: "封顶价",
-      durationSeconds: "竞拍时长秒"
+      durationSeconds: "竞拍时长秒",
+      stock: "库存"
     }[field] ?? field
   );
 }
@@ -940,7 +954,7 @@ function buildLocalProductScript(liveRoom: LiveRoom, row: ProductImportRow) {
   const sellingPoints = row.sellingPoints ? `核心卖点是${row.sellingPoints}，` : "";
   const keywords = row.scriptKeywords ? `讲解时可以突出${row.scriptKeywords}。` : "适合在直播间重点展示细节和使用场景。";
 
-  return `${liveRoom.hostName}为大家带来${row.name}，${sellingPoints}${row.startPrice} 元起拍，每次最低加价 ${row.incrementStep} 元，封顶价 ${row.ceilingPrice} 元，竞拍时长 ${row.durationSeconds} 秒。${keywords}`;
+  return `${liveRoom.hostName}为大家带来${row.name}，${sellingPoints}${row.startPrice} 元起拍，每次最低加价 ${row.incrementStep} 元，封顶价 ${row.ceilingPrice} 元，竞拍时长 ${row.durationSeconds} 秒，库存 ${row.stock ?? 1} 件。${keywords}`;
 }
 
 function cloneProductWithQueueStatus(product: Product, auction: Auction): Product {
@@ -950,6 +964,7 @@ function cloneProductWithQueueStatus(product: Product, auction: Auction): Produc
     incrementStep: product.incrementStep ?? auction.incrementStep,
     ceilingPrice: product.ceilingPrice ?? auction.ceilingPrice,
     durationSeconds: product.durationSeconds ?? auction.durationSeconds,
+    stock: product.stock ?? 1,
     queueStatus: deriveProductQueueStatus(product, auction)
   };
 }
@@ -1003,6 +1018,11 @@ function syncAuctionConfigToProduct(auction: Auction) {
 function setProductQueueStatus(productId: string, status: ProductQueueStatus) {
   const product = requireProduct(productId);
   product.queueStatus = status;
+}
+
+function decreaseProductStock(productId: string) {
+  const product = requireProduct(productId);
+  product.stock = Math.max(0, (product.stock ?? 1) - 1);
 }
 
 function getErrorMessage(error: unknown) {

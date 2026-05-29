@@ -438,6 +438,12 @@ h2 {
   line-height: 1.6;
 }
 
+.product-stock {
+  margin: 10px 0 0;
+  color: var(--green);
+  font-weight: 800;
+}
+
 .status-pill {
   color: #fff;
   background: #253545;

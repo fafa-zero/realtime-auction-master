@@ -19,6 +19,7 @@
       <text class="eyebrow">当前商品</text>
       <text class="product-name">{{snapshot.product.name}}</text>
       <text class="muted">{{snapshot.product.description}}</text>
+      <text class="stock">{{stockText}}</text>
     </view>
 
     <view class="card ai-script">

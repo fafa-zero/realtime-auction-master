@@ -10,6 +10,7 @@ export interface Product {
   incrementStep?: number;
   ceilingPrice?: number;
   durationSeconds?: number;
+  stock?: number;
   sellingPoints?: string;
   scriptKeywords?: string;
   aiScript?: string;

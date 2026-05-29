@@ -985,6 +985,7 @@ export function App() {
             <p className="eyebrow">当前商品</p>
             <h2>{snapshot.product.name}</h2>
             <p>{snapshot.product.description}</p>
+            <p className="product-stock">库存：{snapshot.product.stock ?? 1} 件</p>
             {snapshot.product.aiScript ? (
               <p className="product-ai-note">AI 讲解：{snapshot.product.aiScript}</p>
             ) : null}
@@ -1127,7 +1128,7 @@ export function App() {
                 </button>
               </div>
               <p className="muted template-hint">
-                表头：商品名称、商品描述、起拍价、最低加价、封顶价、竞拍时长秒、商品卖点、讲解关键词。
+                表头：商品名称、商品描述、起拍价、最低加价、封顶价、竞拍时长秒、库存、商品卖点、讲解关键词。
               </p>
               {importResult ? (
                 <div className="import-result">
@@ -1187,7 +1188,7 @@ export function App() {
                         </div>
                         <span>
                           {formatMoney(item.auction.startPrice)} 起拍 / 加价 {formatMoney(item.auction.incrementStep)} / 封顶{" "}
-                          {formatMoney(item.auction.ceilingPrice)}
+                          {formatMoney(item.auction.ceilingPrice)} / 库存 {item.product.stock ?? 1} 件
                         </span>
                         {item.product.aiScript ? <p>{item.product.aiScript}</p> : null}
                       </div>

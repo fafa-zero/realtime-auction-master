@@ -775,6 +775,7 @@ function recordToProductImportRow(record: SpreadsheetRecord): ProductImportRow {
     incrementStep: parseImportNumber(getRecordValue(record, "最低加价")),
     ceilingPrice: parseImportNumber(getRecordValue(record, "封顶价")),
     durationSeconds: parseImportNumber(getRecordValue(record, "竞拍时长秒", "竞拍时长")),
+    stock: parseOptionalImportNumber(getRecordValue(record, "库存")),
     sellingPoints: getRecordValue(record, "商品卖点"),
     scriptKeywords: getRecordValue(record, "讲解关键词")
   };
@@ -795,6 +796,10 @@ function getRecordValue(record: SpreadsheetRecord, ...keys: string[]) {
 function parseImportNumber(value: string) {
   const normalized = value.replace(/[,\s￥¥]/g, "");
   return Number(normalized);
+}
+
+function parseOptionalImportNumber(value: string) {
+  return value.trim() ? parseImportNumber(value) : undefined;
 }
 
 function getAuthToken(req: express.Request) {
