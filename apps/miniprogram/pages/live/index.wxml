@@ -10,6 +10,7 @@
         <text class="live-badge">{{liveBadgeText}}</text>
         <text class="stage-title">{{room.title}}</text>
         <text class="stage-meta">{{room.hostName}} / {{room.viewerCount}} 人浏览</text>
+        <text class="stage-meta">{{buyerText}}</text>
         <text class="realtime">{{realtimeText}}</text>
       </view>
     </view>
@@ -18,6 +19,11 @@
       <text class="eyebrow">当前商品</text>
       <text class="product-name">{{snapshot.product.name}}</text>
       <text class="muted">{{snapshot.product.description}}</text>
+    </view>
+
+    <view class="card ai-script">
+      <text class="eyebrow">AI 好物讲解</text>
+      <text>{{aiScriptText}}</text>
     </view>
 
     <view class="stats">

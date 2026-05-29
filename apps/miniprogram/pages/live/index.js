@@ -87,6 +87,8 @@ Page({
     bidCountText: "0 条记录",
     bidButtonText: "参与",
     hint: "开始后可参与",
+    buyerText: "买家未登录",
+    aiScriptText: "",
     realtimeText: "实时连接准备中",
     debugText: "",
     canBid: false
@@ -95,6 +97,7 @@ Page({
   async onLoad(options) {
     const liveRoomId = options.liveRoomId || "live-1";
     this.setData({ liveRoomId, loading: false, error: "" });
+    await this.ensurePageLogin();
     this.applySnapshot({
       ...fallbackSnapshot,
       auction: { ...fallbackSnapshot.auction, liveRoomId },
@@ -103,7 +106,7 @@ Page({
   },
 
   onShow() {
-    this.load();
+    this.ensurePageLogin().then(() => this.load());
     this.clockTimer = setInterval(() => this.refreshComputed(), 500);
     this.pollingTimer = setInterval(() => this.loadSnapshot(), POLLING_INTERVAL_MS);
   },
@@ -138,6 +141,19 @@ Page({
       });
     } finally {
       this.setData({ loading: false });
+    }
+  },
+
+  async ensurePageLogin() {
+    try {
+      await getApp().ensureLogin();
+      const user = getApp().globalData.user;
+      this.setData({
+        buyerText: user ? `当前买家：${user.nickname}` : "买家未登录"
+      });
+    } catch (error) {
+      wx.redirectTo({ url: "/pages/index/index" });
+      throw error;
     }
   },
 
@@ -207,7 +223,8 @@ Page({
       statusText: statusMap[snapshot.auction.status] || snapshot.auction.status,
       liveBadgeText: badgeMap[snapshot.auction.status] || snapshot.auction.status,
       leaderText: snapshot.auction.winnerNickname || "暂无领先用户",
-      bidCountText: `${bids.length} 条记录`
+      bidCountText: `${bids.length} 条记录`,
+      aiScriptText: product.aiScript ? product.aiScript.slice(0, 120) : "主播正在准备 AI 好物讲解"
     });
     this.refreshComputed();
   },

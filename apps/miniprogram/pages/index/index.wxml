@@ -6,10 +6,27 @@
     <text class="muted">{{apiText}}</text>
   </view>
 
+  <view class="login-card">
+    <view>
+      <text class="login-title">买家登录</text>
+      <text class="muted">登录后进入好物专场，重复登录会复用同一个演示身份。</text>
+    </view>
+    <input
+      value="{{nickname}}"
+      placeholder="请输入买家昵称"
+      bindinput="onNicknameInput"
+      disabled="{{loggedIn}}"
+    />
+    <button wx:if="{{!loggedIn}}" class="primary" loading="{{loggingIn}}" bindtap="loginBuyer">
+      进入好物专场
+    </button>
+    <button wx:else class="secondary" bindtap="logout">退出登录</button>
+  </view>
+
   <view wx:if="{{loading}}" class="card muted">正在加载专场...</view>
   <view wx:elif="{{error}}" class="card error">{{error}}</view>
 
-  <view wx:else>
+  <view wx:elif="{{loggedIn}}">
     <view
       wx:for="{{rooms}}"
       wx:key="id"

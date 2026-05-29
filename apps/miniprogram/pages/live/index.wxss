@@ -69,6 +69,13 @@
   gap: 10rpx;
 }
 
+.ai-script {
+  display: grid;
+  gap: 10rpx;
+  border-left: 6rpx solid #d82f44;
+  line-height: 1.65;
+}
+
 .product-name {
   font-size: 38rpx;
   font-weight: 900;

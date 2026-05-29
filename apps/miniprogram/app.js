@@ -12,6 +12,17 @@ App({
   onLaunch() {
     wx.removeStorageSync("auction_api_base_url");
     this.globalData.apiBaseUrl = DEFAULT_API_BASE_URL;
+    this.restoreStoredSession();
+  },
+
+  restoreStoredSession() {
+    const storedToken = wx.getStorageSync("auction_token");
+    const storedUser = wx.getStorageSync("auction_user");
+
+    if (storedToken && storedUser) {
+      this.globalData.token = storedToken;
+      this.globalData.user = storedUser;
+    }
   },
 
   async ensureLogin() {
@@ -44,7 +55,14 @@ App({
       }
     }
 
-    const nickname = `小程序用户${Math.floor(Math.random() * 90 + 10)}`;
+    await this.loginDemoUser();
+
+    return this.globalData;
+  },
+
+  async loginDemoUser(input = {}) {
+    const nickname = input.nickname || wx.getStorageSync("auction_nickname") || "演示买家";
+    wx.setStorageSync("auction_nickname", nickname);
     const result = await loginDemo({ nickname });
 
     this.globalData.token = result.token;
@@ -52,6 +70,13 @@ App({
     wx.setStorageSync("auction_token", result.token);
     wx.setStorageSync("auction_user", result.user);
 
-    return this.globalData;
+    return result;
+  },
+
+  logout() {
+    this.globalData.token = "";
+    this.globalData.user = null;
+    wx.removeStorageSync("auction_token");
+    wx.removeStorageSync("auction_user");
   }
 });

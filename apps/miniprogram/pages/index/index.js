@@ -18,17 +18,68 @@ const fallbackRooms = [
 Page({
   data: {
     loading: false,
+    loggingIn: false,
+    loggedIn: false,
     error: "",
     rooms: fallbackRooms,
-    userText: "演示登录用户",
+    nickname: "演示买家",
+    userText: "请先登录",
     apiText: `后端：${getApiBaseUrl()}`
   },
 
   async onShow() {
-    this.setData({ loading: false, error: "" });
+    const app = getApp();
+    this.setData({
+      loading: false,
+      error: "",
+      loggedIn: Boolean(app.globalData.token && app.globalData.user),
+      nickname: wx.getStorageSync("auction_nickname") || app.globalData.user?.nickname || "演示买家",
+      userText: app.globalData.user ? `当前用户：${app.globalData.user.nickname}` : "请先登录后进入专场"
+    });
+
+    if (app.globalData.token && app.globalData.user) {
+      this.load();
+    }
+  },
+
+  onNicknameInput(event) {
+    this.setData({ nickname: event.detail.value });
+  },
+
+  async loginBuyer() {
+    const nickname = String(this.data.nickname || "").trim() || "演示买家";
+    this.setData({ loggingIn: true, error: "" });
+
+    try {
+      const result = await getApp().loginDemoUser({ nickname });
+      this.setData({
+        loggedIn: true,
+        userText: `当前用户：${result.user.nickname}`,
+        nickname: result.user.nickname
+      });
+      await this.load();
+    } catch (error) {
+      this.setData({ error: error.message || "登录失败" });
+    } finally {
+      this.setData({ loggingIn: false });
+    }
+  },
+
+  logout() {
+    getApp().logout();
+    this.setData({
+      loggedIn: false,
+      userText: "请先登录后进入专场",
+      rooms: fallbackRooms
+    });
   },
 
   async load() {
+    if (!getApp().globalData.token) {
+      this.setData({ loggedIn: false, userText: "请先登录后进入专场" });
+      return;
+    }
+
     this.setData({ loading: true, error: "" });
 
     try {
@@ -53,6 +104,11 @@ Page({
   },
 
   openLive(event) {
+    if (!this.data.loggedIn) {
+      this.setData({ error: "请先登录后进入专场" });
+      return;
+    }
+
     const liveRoomId = event.currentTarget.dataset.id;
     wx.navigateTo({
       url: `/pages/live/index?liveRoomId=${liveRoomId}`
