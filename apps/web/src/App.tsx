@@ -848,10 +848,9 @@ export function App() {
         session={session}
         authChecked={authChecked}
         message={authMessage}
-        onDemoLogin={handleDemoLogin}
         onShowRegister={() => {
           setAuthMode("register");
-          navigateTo("/host", setRoute);
+          navigateTo(`/live/${liveRoomId}`, setRoute);
         }}
         onLogout={handleLogout}
         onGoHost={() => navigateTo("/host", setRoute)}
@@ -869,16 +868,19 @@ export function App() {
     );
   }
 
-  if (viewMode === "host" && !session) {
+  if (!session && !route.notFound) {
     return (
       <LoginRoute
-        message={authMessage || "商家控制台需要先登录演示账号"}
+        message={
+          authMessage ||
+          (viewMode === "buyer" ? "买家预览需要先登录或注册买家账号" : "商家控制台需要先登录或注册账号")
+        }
         mode={authMode}
+        preferredRole={viewMode === "buyer" ? "BUYER" : "HOST"}
         onModeChange={setAuthMode}
         onDemoLogin={handleDemoLogin}
         onLogin={handleManualLogin}
         onRegister={handleRegister}
-        onGoLive={() => navigateTo(`/live/${liveRoomId}`, setRoute)}
       />
     );
   }
@@ -1481,17 +1483,21 @@ function RouteError(props: {
 function LoginRoute(props: {
   message: string;
   mode: "login" | "register";
+  preferredRole: "HOST" | "BUYER";
   onModeChange: (mode: "login" | "register") => void;
   onDemoLogin: (role: "HOST" | "BUYER") => void;
   onLogin: (input: { account: string; password: string }) => void;
   onRegister: (input: RegisterInput) => void;
-  onGoLive: () => void;
 }) {
   const [account, setAccount] = useState("");
   const [password, setPassword] = useState("");
   const [nickname, setNickname] = useState("");
-  const [role, setRole] = useState<"HOST" | "BUYER">("HOST");
+  const [role, setRole] = useState<"HOST" | "BUYER">(props.preferredRole);
   const isRegister = props.mode === "register";
+
+  useEffect(() => {
+    setRole(props.preferredRole);
+  }, [props.preferredRole]);
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -1590,9 +1596,6 @@ function LoginRoute(props: {
             使用买家演示账号
           </button>
         </div>
-        <button className="link-button" onClick={props.onGoLive}>
-          不登录，打开观众预览
-        </button>
       </div>
     </main>
   );
@@ -1603,7 +1606,6 @@ function HomeRoute(props: {
   session: WebSession | null;
   authChecked: boolean;
   message: string;
-  onDemoLogin: (role: "HOST" | "BUYER") => void;
   onShowRegister: () => void;
   onLogout: () => void;
   onGoHost: () => void;
@@ -1619,23 +1621,23 @@ function HomeRoute(props: {
           {props.session
             ? `当前已登录：${props.session.user.nickname}`
             : props.authChecked
-              ? "使用演示账号进入商家控制台或买家预览。"
+              ? "进入后可登录已有账号、注册新账号，或使用演示账号。"
               : "正在校验登录状态..."}
         </p>
         {props.message ? <p className="route-hint">{props.message}</p> : null}
         <div className="route-error-actions">
-          <button className="primary-button" onClick={() => (props.session ? props.onGoHost() : props.onDemoLogin("HOST"))}>
+          <button className="primary-button" onClick={props.onGoHost}>
             <Radio size={16} />
             商家/主播入口
           </button>
-          <button onClick={() => (props.session ? props.onGoLive(props.liveRoomId) : props.onDemoLogin("BUYER"))}>
+          <button onClick={() => props.onGoLive(props.liveRoomId)}>
             <Users size={16} />
             买家预览入口
           </button>
         </div>
         {!props.session ? (
           <button className="link-button" onClick={props.onShowRegister}>
-            注册新的商家账号
+            注册新账号
           </button>
         ) : null}
         {props.session ? (
