@@ -223,7 +223,7 @@ export function App() {
   }, [currentUser?.nickname]);
 
   useEffect(() => {
-    if (route.notFound || route.home) {
+    if (route.notFound || route.home || !session) {
       return;
     }
 
@@ -359,7 +359,7 @@ export function App() {
       cancelled = true;
       socket.disconnect();
     };
-  }, [liveRoomId, route.home, route.notFound]);
+  }, [liveRoomId, route.home, route.notFound, session?.token, viewMode]);
 
   useEffect(() => {
     fetch(`${API_URL}/api/live-rooms`)
@@ -571,6 +571,7 @@ export function App() {
     emitBid({
       userId,
       nickname: cleanNickname,
+      token: viewMode === "buyer" ? session?.token : undefined,
       price,
       onDone: () => {
         setSubmittingBid(false);
@@ -610,6 +611,7 @@ export function App() {
   function emitBid(input: {
     userId: string;
     nickname: string;
+    token?: string;
     price: number;
     onDone?: () => void;
   }) {
@@ -625,6 +627,7 @@ export function App() {
         userId: input.userId,
         liveRoomId,
         nickname: input.nickname,
+        token: input.token,
         price: input.price,
         clientRequestId: `${input.userId}-${Date.now()}-${Math.random().toString(16).slice(2)}`
       },
@@ -697,7 +700,10 @@ export function App() {
       return;
     }
 
-    const res = await fetch(`${API_URL}/api/orders/${snapshot.order.id}/pay`, { method: "POST" });
+    const res = await fetch(`${API_URL}/api/orders/${snapshot.order.id}/pay`, {
+      method: "POST",
+      headers: viewMode === "buyer" ? getAuthHeaders(session) : undefined
+    });
     const data = await readJson<PayOrderResponse & { message?: string }>(res);
 
     if (!res.ok) {
@@ -720,9 +726,19 @@ export function App() {
 
   async function refreshArchiveData() {
     try {
+      const ordersUrl =
+        viewMode === "buyer"
+          ? `${API_URL}/api/me/orders?liveRoomId=${encodeURIComponent(liveRoomId)}`
+          : `${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/orders`;
+      const ordersInit =
+        viewMode === "buyer"
+          ? {
+              headers: getAuthHeaders(session)
+            }
+          : undefined;
       const [historyRes, ordersRes] = await Promise.all([
         fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/auction/history`),
-        fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/orders`)
+        fetch(ordersUrl, ordersInit)
       ]);
       const historyData = await readJson<{ items?: AuctionHistoryItem[] }>(historyRes);
       const ordersData = await readJson<{ items?: Order[] }>(ordersRes);
@@ -1419,8 +1435,18 @@ export function App() {
           <section className="panel-section">
             <div className="section-title">
               <History size={18} />
-              <h2>我的竞拍</h2>
+              <h2>我的竞拍与订单</h2>
             </div>
+            <ArchiveList
+              emptyText="暂无订单"
+              items={orders.slice(0, 5).map((item) => ({
+                id: item.id,
+                title: item.buyerNickname,
+                meta: `${formatMoney(item.finalPrice)} / ${item.status === "PAID" ? "已支付" : "待支付"}`,
+                time: item.createdAt
+              }))}
+            />
+            <div className="archive-subtitle">参与记录</div>
             <ArchiveList
               emptyText="暂无参与记录"
               items={myHistory.slice(0, 5).map((item) => ({
@@ -1757,6 +1783,10 @@ async function readJson<T>(res: Response): Promise<T> {
       ? "接口返回了页面 HTML，请确认后端已重启且 VITE_API_URL/代理地址指向后端服务"
       : preview || "接口返回格式不是 JSON"
   );
+}
+
+function getAuthHeaders(session: WebSession | null): HeadersInit {
+  return session?.token ? { Authorization: `Bearer ${session.token}` } : {};
 }
 
 function readStoredSession(): WebSession | null {
