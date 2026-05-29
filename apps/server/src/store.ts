@@ -94,6 +94,7 @@ export interface StartAuctionOptions {
 export interface MiniprogramAuthInput {
   code?: string;
   mockCode?: string;
+  openId?: string;
   nickname?: string;
   avatarUrl?: string;
 }
@@ -884,6 +885,10 @@ function createSession(userId: string): Session {
 }
 
 function getMiniprogramOpenId(input: MiniprogramAuthInput) {
+  if (input.openId?.trim()) {
+    return `wechat-openid-${input.openId.trim()}`;
+  }
+
   const loginCode = input.mockCode?.trim() || input.code?.trim();
 
   if (!loginCode) {

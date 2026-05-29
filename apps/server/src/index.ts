@@ -34,6 +34,7 @@ import {
 } from "./store.js";
 import type { ProductImportRow } from "./store.js";
 import { parseSpreadsheet, type SpreadsheetRecord } from "./spreadsheet.js";
+import { resolveMiniprogramLogin } from "./wechat.js";
 
 const PORT = Number(process.env.PORT ?? 4200);
 const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5174";
@@ -84,7 +85,7 @@ app.get(["/", "/host", "/live/:liveRoomId"], (_req, res) => {
   res.sendFile(path.join(WEB_DIST_DIR, "index.html"));
 });
 
-app.post("/api/auth/miniprogram/login", (req, res) => {
+app.post("/api/auth/miniprogram/login", async (req, res) => {
   try {
     const schema = z.object({
       code: z.string().min(1).optional(),
@@ -93,14 +94,15 @@ app.post("/api/auth/miniprogram/login", (req, res) => {
       avatarUrl: z.string().max(500).optional()
     });
     const input = schema.parse(req.body ?? {});
-    const result = loginMiniprogram(input);
+    const login = await resolveMiniprogramLogin(input);
+    const result = loginMiniprogram({ ...input, openId: login.openId });
     res.json({ ok: true, ...result });
   } catch (error) {
     res.status(401).json({ ok: false, message: getErrorMessage(error) });
   }
 });
 
-app.post("/api/auth/miniprogram/register", (req, res) => {
+app.post("/api/auth/miniprogram/register", async (req, res) => {
   try {
     const schema = z.object({
       code: z.string().min(1).optional(),
@@ -109,7 +111,8 @@ app.post("/api/auth/miniprogram/register", (req, res) => {
       avatarUrl: z.string().max(500).optional()
     });
     const input = schema.parse(req.body ?? {});
-    const user = registerMiniprogram(input);
+    const login = await resolveMiniprogramLogin(input);
+    const user = registerMiniprogram({ ...input, openId: login.openId });
     res.json({ ok: true, user });
   } catch (error) {
     res.status(400).json({ ok: false, message: getErrorMessage(error) });

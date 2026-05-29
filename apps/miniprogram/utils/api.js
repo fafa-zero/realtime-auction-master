@@ -148,30 +148,54 @@ function getMockCode() {
   return mockCode;
 }
 
-function registerBuyer(input = {}) {
-  const mockCode = getMockCode();
+function getWechatLoginCode() {
+  return new Promise((resolve) => {
+    if (!wx.login) {
+      resolve("");
+      return;
+    }
+
+    wx.login({
+      success(result) {
+        resolve(result.code || "");
+      },
+      fail() {
+        resolve("");
+      }
+    });
+  });
+}
+
+async function getMiniprogramAuthData(input = {}) {
+  const code = await getWechatLoginCode();
+  const data = {
+    nickname: input.nickname || "小程序用户",
+    avatarUrl: input.avatarUrl || ""
+  };
+
+  if (code) {
+    return { ...data, code };
+  }
+
+  return { ...data, mockCode: getMockCode() };
+}
+
+async function registerBuyer(input = {}) {
+  const data = await getMiniprogramAuthData(input);
 
   return request("/api/auth/miniprogram/register", {
     method: "POST",
-    data: {
-      mockCode,
-      nickname: input.nickname || "小程序用户",
-      avatarUrl: input.avatarUrl || ""
-    },
+    data,
     token: ""
   });
 }
 
-function loginBuyer(input = {}) {
-  const mockCode = getMockCode();
+async function loginBuyer(input = {}) {
+  const data = await getMiniprogramAuthData(input);
 
   return request("/api/auth/miniprogram/login", {
     method: "POST",
-    data: {
-      mockCode,
-      nickname: input.nickname || "小程序用户",
-      avatarUrl: input.avatarUrl || ""
-    },
+    data,
     token: ""
   });
 }

@@ -33,7 +33,7 @@ realtime-auction-master
 - 达到封顶价自动成交
 - 主播取消异常竞拍
 - 成交后生成模拟订单
-- 小程序演示登录、出价、我的订单
+- 小程序微信登录、买家注册、出价、我的订单
 - AI 生成商品讲解词
 - AI 生成竞拍复盘总结
 - AI 生成异常出价提示
@@ -82,9 +82,13 @@ npm run dev
 PORT=4200
 CLIENT_URL=http://localhost:5174
 AUCTION_DATA_FILE=data/auction-state.json
+WECHAT_MINIPROGRAM_APPID=
+WECHAT_MINIPROGRAM_SECRET=
 ```
 
 `AUCTION_DATA_FILE` 用于保存直播间、用户、会话、竞拍、出价、历史记录和订单。默认写入本地 `data/` 目录，适合演示阶段的轻量持久化；生产环境应替换为数据库。
+
+小程序登录优先使用 `wx.login()` 获取 code。后端配置 `WECHAT_MINIPROGRAM_APPID` 和 `WECHAT_MINIPROGRAM_SECRET` 后，会调用微信 `jscode2session` 换取 openid 并绑定买家账号；本地未配置这两个变量时，会自动回落到稳定演示身份，方便开发联调。
 
 前端：
 
@@ -131,7 +135,8 @@ AI_MODEL=your_model_name
 ## 主要接口
 
 - `GET /api/health`：健康检查。
-- `POST /api/auth/miniprogram/login`：小程序演示登录，支持 `mockCode`。
+- `POST /api/auth/miniprogram/register`：小程序买家注册，支持微信 `code`，本地未配置微信密钥时支持 `mockCode` 兜底。
+- `POST /api/auth/miniprogram/login`：小程序买家登录，支持微信 `code`，只允许已注册买家登录。
 - `GET /api/me`：通过 Bearer token 查询当前用户。
 - `GET /api/me/orders?liveRoomId=live-1`：查询当前用户订单。
 - `GET /api/live-rooms`：获取直播间列表。
