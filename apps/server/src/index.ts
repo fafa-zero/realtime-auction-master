@@ -7,7 +7,9 @@ import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import { z } from "zod";
 import {
   cancelAuction,
+  archiveAuctionProduct,
   blockDanmakuUser,
+  createAuctionProduct,
   createLiveRoom,
   detectBidRisk,
   getAuctionHistory,
@@ -32,11 +34,14 @@ import {
   placeBid,
   registerMiniprogram,
   registerWebUser,
+  reorderAuctionProducts,
+  resetDemoState,
   retractDanmakuMessage,
   sendDanmakuMessage,
   settleAuction,
   startAuction,
   startProductAuction,
+  updateAuctionProduct,
   updateUserProfileByToken
 } from "./store.js";
 import type { ProductImportRow } from "./store.js";
@@ -86,6 +91,19 @@ function getLocalClientOrigins(clientUrl: string) {
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, serverTime: Date.now() });
+});
+
+const productManageSchema = z.object({
+  name: z.string().min(1, "商品名称不能为空").max(80),
+  description: z.string().min(1, "商品描述不能为空").max(300),
+  imageUrl: z.string().max(500).optional(),
+  startPrice: z.number().int().min(0),
+  incrementStep: z.number().int().min(1),
+  ceilingPrice: z.number().int().min(1),
+  durationSeconds: z.number().int().min(15).max(600),
+  stock: z.number().int().min(1).max(100_000).optional(),
+  sellingPoints: z.string().max(300).optional(),
+  scriptKeywords: z.string().max(200).optional()
 });
 
 app.get(["/", "/host", "/host/setup", "/live/:liveRoomId"], (_req, res) => {
@@ -176,6 +194,22 @@ app.patch("/api/me/profile", (req, res) => {
     res.json({ ok: true, user });
   } catch (error) {
     res.status(400).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
+app.post("/api/admin/reset-demo", (req, res) => {
+  try {
+    requireHostUser(req);
+    const result = resetDemoState();
+
+    for (const snapshot of result.snapshots) {
+      broadcastAuctionEvent(snapshot.auction.liveRoomId, "auction:snapshot", snapshot);
+      broadcastAuctionEvent(snapshot.auction.liveRoomId, "danmaku:history", []);
+    }
+
+    res.json(result);
+  } catch (error) {
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
   }
 });
 
@@ -285,6 +319,52 @@ app.get("/api/live-rooms/:liveRoomId/products", (req, res) => {
   }
 });
 
+app.post("/api/live-rooms/:liveRoomId/products", (req, res) => {
+  try {
+    assertLiveRoom(req.params.liveRoomId);
+    requireHostUser(req);
+    const input = productManageSchema.parse(req.body ?? {});
+    res.json(createAuctionProduct(req.params.liveRoomId, input));
+  } catch (error) {
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
+app.patch("/api/live-rooms/:liveRoomId/products/:productId", (req, res) => {
+  try {
+    assertLiveRoom(req.params.liveRoomId);
+    requireHostUser(req);
+    const input = productManageSchema.partial().parse(req.body ?? {});
+    res.json(updateAuctionProduct(req.params.liveRoomId, req.params.productId, input));
+  } catch (error) {
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
+app.delete("/api/live-rooms/:liveRoomId/products/:productId", (req, res) => {
+  try {
+    assertLiveRoom(req.params.liveRoomId);
+    requireHostUser(req);
+    res.json(archiveAuctionProduct(req.params.liveRoomId, req.params.productId));
+  } catch (error) {
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
+app.post("/api/live-rooms/:liveRoomId/products/reorder", (req, res) => {
+  try {
+    assertLiveRoom(req.params.liveRoomId);
+    requireHostUser(req);
+    const schema = z.object({
+      productIds: z.array(z.string().min(1)).min(1)
+    });
+    const input = schema.parse(req.body ?? {});
+    res.json(reorderAuctionProducts(req.params.liveRoomId, input.productIds));
+  } catch (error) {
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
 app.get("/api/live-rooms/:liveRoomId/danmaku", (req, res) => {
   try {
     assertLiveRoom(req.params.liveRoomId);
@@ -377,6 +457,7 @@ app.post("/api/live-rooms/:liveRoomId/danmaku/block-user", (req, res) => {
 app.post("/api/live-rooms/:liveRoomId/products/import", async (req, res) => {
   try {
     assertLiveRoom(req.params.liveRoomId);
+    requireHostUser(req);
     const records = Array.isArray(req.body?.rows)
       ? (req.body.rows as SpreadsheetRecord[])
       : parseSpreadsheetFromUpload(await readUpload(req), req.headers["content-type"]);
@@ -390,6 +471,7 @@ app.post("/api/live-rooms/:liveRoomId/products/import", async (req, res) => {
 app.post("/api/live-rooms/:liveRoomId/products/:productId/start", (req, res) => {
   try {
     assertLiveRoom(req.params.liveRoomId);
+    requireHostUser(req);
     const snapshot = startProductAuction(req.params.liveRoomId, req.params.productId);
     broadcastAuctionEvent(req.params.liveRoomId, "auction:started", snapshot);
     res.json(snapshot);
@@ -401,6 +483,7 @@ app.post("/api/live-rooms/:liveRoomId/products/:productId/start", (req, res) => 
 app.post("/api/live-rooms/:liveRoomId/products/:productId/ai-script", async (req, res) => {
   try {
     assertLiveRoom(req.params.liveRoomId);
+    requireHostUser(req);
     res.json(await generateProductScript(req.params.liveRoomId, req.params.productId));
   } catch (error) {
     res.status(400).json(createAiErrorResponse(getErrorMessage(error)));
@@ -427,15 +510,21 @@ app.get("/api/live-rooms/:liveRoomId/auction/history", (req, res) => {
 });
 
 app.get("/api/orders", (_req, res) => {
-  res.json({
-    ok: true,
-    items: getOrders()
-  });
+  try {
+    requireHostUser(_req);
+    res.json({
+      ok: true,
+      items: getOrders()
+    });
+  } catch (error) {
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
+  }
 });
 
 app.get("/api/live-rooms/:liveRoomId/orders", (req, res) => {
   try {
     assertLiveRoom(req.params.liveRoomId);
+    requireHostUser(req);
     res.json({
       ok: true,
       items: getOrders(req.params.liveRoomId)
@@ -446,16 +535,17 @@ app.get("/api/live-rooms/:liveRoomId/orders", (req, res) => {
 });
 
 app.post("/api/auction/start", (req, res) => {
-  handleStartAuction(req.body, DEFAULT_LIVE_ROOM_ID, res);
+  handleStartAuction(req, DEFAULT_LIVE_ROOM_ID, res);
 });
 
 app.post("/api/live-rooms/:liveRoomId/auction/start", (req, res) => {
-  handleStartAuction(req.body, req.params.liveRoomId, res);
+  handleStartAuction(req, req.params.liveRoomId, res);
 });
 
-function handleStartAuction(body: unknown, liveRoomId: string, res: express.Response) {
+function handleStartAuction(req: express.Request, liveRoomId: string, res: express.Response) {
   try {
     assertLiveRoom(liveRoomId);
+    requireHostUser(req);
     const schema = z.object({
       durationSeconds: z
         .number({ invalid_type_error: "专场时长必须是数字" })
@@ -476,35 +566,36 @@ function handleStartAuction(body: unknown, liveRoomId: string, res: express.Resp
         .max(10_000_000, "封顶价不能超过 10000000 元")
         .optional()
     });
-    const input = schema.parse(body ?? {});
+    const input = schema.parse(req.body ?? {});
     const snapshot = startAuction(liveRoomId, input);
     broadcastAuctionEvent(liveRoomId, "auction:started", snapshot);
     res.json(snapshot);
   } catch (error) {
-    res.status(400).json({ message: getErrorMessage(error) });
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
   }
 }
 
 app.post("/api/auction/cancel", (req, res) => {
-  handleCancelAuction(req.body, DEFAULT_LIVE_ROOM_ID, res);
+  handleCancelAuction(req, DEFAULT_LIVE_ROOM_ID, res);
 });
 
 app.post("/api/live-rooms/:liveRoomId/auction/cancel", (req, res) => {
-  handleCancelAuction(req.body, req.params.liveRoomId, res);
+  handleCancelAuction(req, req.params.liveRoomId, res);
 });
 
-function handleCancelAuction(body: unknown, liveRoomId: string, res: express.Response) {
+function handleCancelAuction(req: express.Request, liveRoomId: string, res: express.Response) {
   try {
     assertLiveRoom(liveRoomId);
+    requireHostUser(req);
     const schema = z.object({
       reason: z.string().min(1).optional()
     });
-    const input = schema.parse(body);
+    const input = schema.parse(req.body ?? {});
     const result = cancelAuction(liveRoomId, input.reason);
     broadcastAuctionEvent(liveRoomId, "auction:cancelled", result);
     res.json(result.snapshot);
   } catch (error) {
-    res.status(400).json({ message: getErrorMessage(error) });
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
   }
 }
 
@@ -556,10 +647,10 @@ function handlePlaceBid(body: unknown, liveRoomId: string, res: express.Response
 
 app.post("/api/orders/:orderId/pay", (req, res) => {
   try {
-    const authUser = getOptionalAuthUser(req);
+    const authUser = getUserByToken(getAuthToken(req));
     const order = getOrder(req.params.orderId);
 
-    if (authUser && order.buyerUserId !== authUser.id) {
+    if (order.buyerUserId !== authUser.id) {
       res.status(403).json({ ok: false, message: "只能支付自己的订单" });
       return;
     }
@@ -575,23 +666,34 @@ app.post("/api/orders/:orderId/pay", (req, res) => {
       snapshot
     });
   } catch (error) {
-    res.status(400).json({ message: getErrorMessage(error) });
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
   }
 });
 
 app.post("/api/ai/product-script", async (req, res) => {
-  const liveRoomId = getLiveRoomIdFromRequest(req.body);
-  const productId = getProductIdFromRequest(req.body);
-  res.json(await generateProductScript(liveRoomId, productId));
+  try {
+    requireHostUser(req);
+    const liveRoomId = getLiveRoomIdFromRequest(req.body);
+    const productId = getProductIdFromRequest(req.body);
+    res.json(await generateProductScript(liveRoomId, productId));
+  } catch (error) {
+    res.status(getErrorStatus(error)).json(createAiErrorResponse(getErrorMessage(error)));
+  }
 });
 
 app.post("/api/ai/auction-summary", async (req, res) => {
-  const liveRoomId = getLiveRoomIdFromRequest(req.body);
-  res.json(await generateAuctionSummary(liveRoomId));
+  try {
+    requireHostUser(req);
+    const liveRoomId = getLiveRoomIdFromRequest(req.body);
+    res.json(await generateAuctionSummary(liveRoomId));
+  } catch (error) {
+    res.status(getErrorStatus(error)).json(createAiErrorResponse(getErrorMessage(error)));
+  }
 });
 
 app.post("/api/ai/bid-risk", async (req, res) => {
   try {
+    requireHostUser(req);
     const schema = z.object({
       liveRoomId: z.string().min(1).optional(),
       userId: z.string().min(1),
@@ -600,7 +702,7 @@ app.post("/api/ai/bid-risk", async (req, res) => {
     const input = schema.parse(req.body);
     res.json(await detectBidRisk(input));
   } catch (error) {
-    res.status(400).json(createAiErrorResponse(getErrorMessage(error)));
+    res.status(getErrorStatus(error)).json(createAiErrorResponse(getErrorMessage(error)));
   }
 });
 
@@ -827,7 +929,20 @@ function getErrorMessage(error: unknown) {
 
 function getErrorStatus(error: unknown) {
   const message = getErrorMessage(error);
-  return message.includes("专场不存在") ? 404 : 401;
+  if (message.includes("专场不存在") || message.includes("不存在")) {
+    return 404;
+  }
+
+  if (
+    message.includes("需要主播") ||
+    message.includes("只有买家") ||
+    message.includes("只能支付") ||
+    message.includes("权限")
+  ) {
+    return 403;
+  }
+
+  return 401;
 }
 
 function createAiErrorResponse(message: string) {
@@ -1035,9 +1150,13 @@ function requireHostUser(req: express.Request) {
 
 function resolveBidder(
   input: { userId?: string; nickname?: string },
-  authUser: { id: string; nickname: string } | null
+  authUser: { id: string; nickname: string; role?: string } | null
 ) {
   if (authUser) {
+    if (authUser.role !== "BUYER") {
+      throw new Error("只有买家账号可以出价");
+    }
+
     return {
       userId: authUser.id,
       nickname: authUser.nickname

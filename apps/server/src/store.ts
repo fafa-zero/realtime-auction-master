@@ -21,60 +21,9 @@ import type {
 const DATA_FILE = resolve(process.env.AUCTION_DATA_FILE ?? "data/auction-state.json");
 const DEFAULT_LIVE_ROOM_ID = "live-1";
 
-const products: Product[] = [
-  {
-    id: "product-1",
-    name: "天然翡翠吊坠",
-    imageUrl: "/static/jewelry.jpg",
-    description: "好物专场演示商品，适合用于演示实时互动、价格更新和订单确认流程。",
-    stock: 1
-  },
-  {
-    id: "product-2",
-    name: "复古机械腕表",
-    imageUrl: "/static/watch.jpg",
-    description: "第二个好物专场演示商品，用于验证多专场状态隔离和用户入口切换。",
-    stock: 1
-  }
-];
-
-const liveRooms: LiveRoom[] = [
-  {
-    id: "live-1",
-    title: "珠宝严选好物专场",
-    hostName: "小雅",
-    streamUrl: "https://example.com/mock/jewelry-live.m3u8",
-    viewerCount: 1286,
-    currentAuctionId: "auction-1"
-  },
-  {
-    id: "live-2",
-    title: "腕表收藏好物专场",
-    hostName: "阿辰",
-    streamUrl: "https://example.com/mock/watch-live.m3u8",
-    viewerCount: 842,
-    currentAuctionId: "auction-2"
-  }
-];
-
-const auctions: Auction[] = [
-  createSeedAuction({
-    id: "auction-1",
-    liveRoomId: "live-1",
-    productId: "product-1",
-    incrementStep: 100,
-    ceilingPrice: 3000,
-    durationSeconds: 90
-  }),
-  createSeedAuction({
-    id: "auction-2",
-    liveRoomId: "live-2",
-    productId: "product-2",
-    incrementStep: 200,
-    ceilingPrice: 8800,
-    durationSeconds: 120
-  })
-];
+const products: Product[] = createDefaultProducts();
+const liveRooms: LiveRoom[] = createDefaultLiveRooms();
+const auctions: Auction[] = createDefaultAuctions();
 
 const bids: Bid[] = [];
 const processedBidRequestIds = new Map<string, Bid>();
@@ -118,6 +67,7 @@ export interface RegisterWebInput extends LoginWebInput {
 export interface ProductImportRow {
   name: string;
   description: string;
+  imageUrl?: string;
   startPrice: number;
   incrementStep: number;
   ceilingPrice: number;
@@ -126,6 +76,8 @@ export interface ProductImportRow {
   sellingPoints?: string;
   scriptKeywords?: string;
 }
+
+export type ProductManageInput = ProductImportRow;
 
 export interface CreateLiveRoomInput {
   ownerUserId: string;
@@ -151,6 +103,67 @@ const DANMAKU_HISTORY_LIMIT = 80;
 const DANMAKU_RATE_LIMIT_WINDOW_MS = 10_000;
 const DANMAKU_RATE_LIMIT_COUNT = 5;
 const DANMAKU_SENSITIVE_WORDS = ["假货", "骗子", "诈骗", "刷单", "加微信", "私聊"];
+
+function createDefaultProducts(): Product[] {
+  return [
+    {
+      id: "product-1",
+      name: "天然翡翠吊坠",
+      imageUrl: "/static/jewelry.jpg",
+      description: "好物专场演示商品，适合用于演示实时互动、价格更新和订单确认流程。",
+      stock: 1
+    },
+    {
+      id: "product-2",
+      name: "复古机械腕表",
+      imageUrl: "/static/watch.jpg",
+      description: "第二个好物专场演示商品，用于验证多专场状态隔离和用户入口切换。",
+      stock: 1
+    }
+  ];
+}
+
+function createDefaultLiveRooms(): LiveRoom[] {
+  return [
+    {
+      id: "live-1",
+      title: "珠宝严选好物专场",
+      hostName: "小雅",
+      streamUrl: "https://example.com/mock/jewelry-live.m3u8",
+      viewerCount: 1286,
+      currentAuctionId: "auction-1"
+    },
+    {
+      id: "live-2",
+      title: "腕表收藏好物专场",
+      hostName: "阿辰",
+      streamUrl: "https://example.com/mock/watch-live.m3u8",
+      viewerCount: 842,
+      currentAuctionId: "auction-2"
+    }
+  ];
+}
+
+function createDefaultAuctions(): Auction[] {
+  return [
+    createSeedAuction({
+      id: "auction-1",
+      liveRoomId: "live-1",
+      productId: "product-1",
+      incrementStep: 100,
+      ceilingPrice: 3000,
+      durationSeconds: 90
+    }),
+    createSeedAuction({
+      id: "auction-2",
+      liveRoomId: "live-2",
+      productId: "product-2",
+      incrementStep: 200,
+      ceilingPrice: 8800,
+      durationSeconds: 120
+    })
+  ];
+}
 
 export function getLiveRooms() {
   return liveRooms.map((room) => enrichLiveRoom(room));
@@ -607,7 +620,153 @@ export function importAuctionProducts(liveRoomId: string, rows: ProductImportRow
   };
 }
 
+export function createAuctionProduct(liveRoomId: string, input: ProductManageInput) {
+  const liveRoom = requireLiveRoom(liveRoomId);
+  const normalized = normalizeProductImportRow(input);
+  const product: Product = {
+    id: `product-${randomUUID()}`,
+    liveRoomId,
+    imageUrl: input.imageUrl?.trim() || "",
+    name: normalized.name,
+    description: normalized.description,
+    startPrice: normalized.startPrice,
+    incrementStep: normalized.incrementStep,
+    ceilingPrice: normalized.ceilingPrice,
+    durationSeconds: normalized.durationSeconds,
+    stock: normalized.stock,
+    sellingPoints: normalized.sellingPoints,
+    scriptKeywords: normalized.scriptKeywords,
+    aiScript: buildLocalProductScript(liveRoom, normalized),
+    buyerAiScript: buildLocalBuyerProductScript(normalized),
+    aiScriptUpdatedAt: Date.now(),
+    queueStatus: "QUEUED",
+    importedAt: Date.now()
+  };
+  const auction = createSeedAuction({
+    id: `auction-${randomUUID()}`,
+    liveRoomId,
+    productId: product.id,
+    startPrice: normalized.startPrice,
+    incrementStep: normalized.incrementStep,
+    ceilingPrice: normalized.ceilingPrice,
+    durationSeconds: normalized.durationSeconds
+  });
+
+  products.push(product);
+  auctions.push(auction);
+  saveState();
+
+  return {
+    ok: true,
+    item: getProductQueue(liveRoomId).find((item) => item.product.id === product.id),
+    items: getProductQueue(liveRoomId)
+  };
+}
+
+export function updateAuctionProduct(
+  liveRoomId: string,
+  productId: string,
+  input: Partial<ProductManageInput>
+) {
+  const liveRoom = requireLiveRoom(liveRoomId);
+  const product = requireProduct(productId);
+  const auction = requireAuctionForProduct(liveRoomId, productId);
+
+  if (auction.status === "ACTIVE") {
+    throw new Error("竞拍中的商品不能编辑");
+  }
+
+  const merged = normalizeProductImportRow({
+    name: input.name ?? product.name,
+    description: input.description ?? product.description,
+    startPrice: input.startPrice ?? product.startPrice ?? auction.startPrice,
+    incrementStep: input.incrementStep ?? product.incrementStep ?? auction.incrementStep,
+    ceilingPrice: input.ceilingPrice ?? product.ceilingPrice ?? auction.ceilingPrice,
+    durationSeconds: input.durationSeconds ?? product.durationSeconds ?? auction.durationSeconds,
+    stock: input.stock ?? product.stock ?? 1,
+    sellingPoints: input.sellingPoints ?? product.sellingPoints,
+    scriptKeywords: input.scriptKeywords ?? product.scriptKeywords
+  });
+
+  product.name = merged.name;
+  product.description = merged.description;
+  product.imageUrl = input.imageUrl !== undefined ? input.imageUrl.trim() : product.imageUrl;
+  product.startPrice = merged.startPrice;
+  product.incrementStep = merged.incrementStep;
+  product.ceilingPrice = merged.ceilingPrice;
+  product.durationSeconds = merged.durationSeconds;
+  product.stock = merged.stock;
+  product.sellingPoints = merged.sellingPoints;
+  product.scriptKeywords = merged.scriptKeywords;
+  product.aiScript = buildLocalProductScript(liveRoom, merged);
+  product.buyerAiScript = buildLocalBuyerProductScript(merged);
+  product.aiScriptUpdatedAt = Date.now();
+
+  auction.startPrice = merged.startPrice;
+  auction.currentPrice = merged.startPrice;
+  auction.incrementStep = merged.incrementStep;
+  auction.ceilingPrice = merged.ceilingPrice;
+  auction.durationSeconds = merged.durationSeconds;
+  saveState();
+
+  return {
+    ok: true,
+    item: getProductQueue(liveRoomId).find((item) => item.product.id === productId),
+    items: getProductQueue(liveRoomId)
+  };
+}
+
+export function archiveAuctionProduct(liveRoomId: string, productId: string) {
+  const auction = requireAuctionForProduct(liveRoomId, productId);
+
+  if (auction.status === "ACTIVE") {
+    throw new Error("竞拍中的商品不能下架");
+  }
+
+  setProductQueueStatus(productId, "CANCELLED");
+  saveState();
+
+  return {
+    ok: true,
+    item: getProductQueue(liveRoomId).find((item) => item.product.id === productId),
+    items: getProductQueue(liveRoomId)
+  };
+}
+
+export function reorderAuctionProducts(liveRoomId: string, productIds: string[]) {
+  const queue = getProductQueue(liveRoomId);
+  const knownIds = new Set(queue.map((item) => item.product.id));
+
+  for (const productId of productIds) {
+    if (!knownIds.has(productId)) {
+      throw new Error("商品不属于当前直播间");
+    }
+  }
+
+  const orderedIds = [
+    ...productIds,
+    ...queue.map((item) => item.product.id).filter((productId) => !productIds.includes(productId))
+  ];
+  const base = Date.now();
+
+  orderedIds.forEach((productId, index) => {
+    requireProduct(productId).importedAt = base + index;
+  });
+  saveState();
+
+  return {
+    ok: true,
+    items: getProductQueue(liveRoomId)
+  };
+}
+
 export function startProductAuction(liveRoomId: string, productId: string) {
+  const product = requireProduct(productId);
+
+  if (product.queueStatus === "CANCELLED") {
+    throw new Error("已下架商品不能开始竞拍");
+  }
+
   return startAuction(liveRoomId, { productId });
 }
 
@@ -955,6 +1114,29 @@ export async function detectBidRisk(input: { liveRoomId?: string; userId: string
   };
 }
 
+export function resetDemoState() {
+  liveRooms.splice(0, liveRooms.length, ...createDefaultLiveRooms());
+  products.splice(0, products.length, ...createDefaultProducts());
+  auctions.splice(0, auctions.length, ...createDefaultAuctions());
+  bids.splice(0, bids.length);
+  orders.splice(0, orders.length);
+  history.splice(0, history.length);
+  users.splice(0, users.length);
+  sessions.splice(0, sessions.length);
+  danmakuMessages.splice(0, danmakuMessages.length);
+  danmakuBlockedUsers.splice(0, danmakuBlockedUsers.length);
+  danmakuRateLimits.clear();
+  processedBidRequestIds.clear();
+  ensureDemoWebAccounts();
+  saveState();
+
+  return {
+    ok: true,
+    rooms: getLiveRooms(),
+    snapshots: getLiveRooms().map((room) => getSnapshot(room.id))
+  };
+}
+
 function createSeedAuction(input: {
   id: string;
   liveRoomId: string;
@@ -1244,6 +1426,7 @@ function normalizeProductImportRow(row: ProductImportRow): ProductImportRow {
   return {
     name,
     description,
+    imageUrl: row.imageUrl?.trim(),
     startPrice: row.startPrice,
     incrementStep: row.incrementStep,
     ceilingPrice: row.ceilingPrice,

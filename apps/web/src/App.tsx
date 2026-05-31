@@ -11,12 +11,14 @@ import {
   FileText,
   History,
   LogOut,
+  Pencil,
   PlusCircle,
   Package,
   PlayCircle,
   Radio,
   Save,
   RotateCcw,
+  Trash2,
   ShieldAlert,
   Sparkles,
   Timer,
@@ -91,6 +93,19 @@ type CreateRoomInput = {
   ceilingPrice: string;
   durationSeconds: string;
   stock: string;
+};
+
+type ProductFormInput = {
+  name: string;
+  description: string;
+  imageUrl: string;
+  startPrice: string;
+  incrementStep: string;
+  ceilingPrice: string;
+  durationSeconds: string;
+  stock: string;
+  sellingPoints: string;
+  scriptKeywords: string;
 };
 
 type ImportResult = {
@@ -175,6 +190,10 @@ export function App() {
   const [sendingDanmaku, setSendingDanmaku] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [importingProducts, setImportingProducts] = useState(false);
+  const [productForm, setProductForm] = useState<ProductFormInput>(() => createEmptyProductForm());
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [savingProduct, setSavingProduct] = useState(false);
+  const [resettingDemo, setResettingDemo] = useState(false);
   const [authMessage, setAuthMessage] = useState("");
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const socketRef = useRef<Socket | null>(null);
@@ -677,7 +696,7 @@ export function App() {
 
     const res = await fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/auction/start`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...getAuthHeaders(session) },
       body: JSON.stringify({
         durationSeconds: duration,
         incrementStep: step,
@@ -699,7 +718,7 @@ export function App() {
   async function cancelAuction() {
     const res = await fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/auction/cancel`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...getAuthHeaders(session) },
       body: JSON.stringify({ reason: "主播手动取消异常竞拍" })
     });
     const data = await readJson<AuctionSnapshot & { message?: string }>(res);
@@ -853,12 +872,12 @@ export function App() {
         type === "risk"
           ? {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json", ...getAuthHeaders(session) },
               body: JSON.stringify({ liveRoomId, userId, price })
             }
           : {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json", ...getAuthHeaders(session) },
               body: JSON.stringify({ liveRoomId, productId: snapshot?.product.id })
             };
       const res = await fetch(`${API_URL}${endpoint}`, init);
@@ -927,7 +946,9 @@ export function App() {
           ? {
               headers: getAuthHeaders(session)
             }
-          : undefined;
+          : {
+              headers: getAuthHeaders(session)
+            };
       const [historyRes, ordersRes] = await Promise.all([
         fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/auction/history`),
         fetch(ordersUrl, ordersInit)
@@ -954,6 +975,153 @@ export function App() {
       setProductQueue(data.items ?? []);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "商品队列加载失败");
+    }
+  }
+
+  function updateProductForm(field: keyof ProductFormInput, value: string) {
+    setProductForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function editProductFromQueue(item: ProductQueueItem) {
+    setEditingProductId(item.product.id);
+    setProductForm(productToForm(item));
+    setMessage(`正在编辑：${item.product.name}`);
+  }
+
+  function clearProductForm() {
+    setEditingProductId(null);
+    setProductForm(createEmptyProductForm());
+  }
+
+  function buildProductPayload() {
+    return {
+      name: productForm.name.trim(),
+      description: productForm.description.trim(),
+      imageUrl: productForm.imageUrl.trim(),
+      startPrice: Number(productForm.startPrice),
+      incrementStep: Number(productForm.incrementStep),
+      ceilingPrice: Number(productForm.ceilingPrice),
+      durationSeconds: Number(productForm.durationSeconds),
+      stock: Number(productForm.stock || 1),
+      sellingPoints: productForm.sellingPoints.trim(),
+      scriptKeywords: productForm.scriptKeywords.trim()
+    };
+  }
+
+  async function saveProductForm() {
+    const payload = buildProductPayload();
+
+    if (!payload.name || !payload.description) {
+      setMessage("请填写商品名称和描述");
+      return;
+    }
+
+    setSavingProduct(true);
+
+    try {
+      const url = editingProductId
+        ? `${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/products/${encodeURIComponent(editingProductId)}`
+        : `${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/products`;
+      const res = await fetch(url, {
+        method: editingProductId ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders(session) },
+        body: JSON.stringify(payload)
+      });
+      const data = await readJson<{ items?: ProductQueueItem[]; message?: string }>(res);
+
+      if (!res.ok) {
+        throw new Error(data.message ?? "保存商品失败");
+      }
+
+      setProductQueue(data.items ?? []);
+      setMessage(editingProductId ? "商品已更新" : "商品已新增");
+      clearProductForm();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "保存商品失败");
+    } finally {
+      setSavingProduct(false);
+    }
+  }
+
+  async function archiveProduct(productId: string) {
+    const res = await fetch(
+      `${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/products/${encodeURIComponent(productId)}`,
+      {
+        method: "DELETE",
+        headers: getAuthHeaders(session)
+      }
+    );
+    const data = await readJson<{ items?: ProductQueueItem[]; message?: string }>(res);
+
+    if (!res.ok) {
+      setMessage(data.message ?? "下架商品失败");
+      return;
+    }
+
+    setProductQueue(data.items ?? []);
+    setMessage("商品已下架");
+  }
+
+  async function moveProduct(productId: string, direction: -1 | 1) {
+    const index = productQueue.findIndex((item) => item.product.id === productId);
+    const targetIndex = index + direction;
+
+    if (index < 0 || targetIndex < 0 || targetIndex >= productQueue.length) {
+      return;
+    }
+
+    const ids = productQueue.map((item) => item.product.id);
+    const [product] = ids.splice(index, 1);
+    ids.splice(targetIndex, 0, product);
+
+    const res = await fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/products/reorder`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...getAuthHeaders(session) },
+      body: JSON.stringify({ productIds: ids })
+    });
+    const data = await readJson<{ items?: ProductQueueItem[]; message?: string }>(res);
+
+    if (!res.ok) {
+      setMessage(data.message ?? "调整排序失败");
+      return;
+    }
+
+    setProductQueue(data.items ?? []);
+    setMessage("商品排序已更新");
+  }
+
+  async function resetDemoData() {
+    setResettingDemo(true);
+
+    try {
+      const res = await fetch(`${API_URL}/api/admin/reset-demo`, {
+        method: "POST",
+        headers: getAuthHeaders(session)
+      });
+      const data = await readJson<{ snapshots?: AuctionSnapshot[]; message?: string }>(res);
+
+      if (!res.ok) {
+        throw new Error(data.message ?? "重置演示数据失败");
+      }
+
+      const nextSnapshot = data.snapshots?.find((item) => item.auction.liveRoomId === liveRoomId) ?? null;
+
+      if (nextSnapshot) {
+        setSnapshot(nextSnapshot);
+      }
+
+      setDanmakuMessages([]);
+      setDanmakuBlockedUsers([]);
+      setOrders([]);
+      setHistoryItems([]);
+      clearProductForm();
+      setMessage("演示数据已重置");
+      void refreshProductQueue();
+      void refreshArchiveData();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "重置演示数据失败");
+    } finally {
+      setResettingDemo(false);
     }
   }
 
@@ -1044,6 +1212,7 @@ export function App() {
       formData.append("file", file);
       const res = await fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/products/import`, {
         method: "POST",
+        headers: getAuthHeaders(session),
         body: formData
       });
       const data = await readJson<ImportResult & {
@@ -1072,7 +1241,7 @@ export function App() {
   async function startProductFromQueue(productId: string) {
     const res = await fetch(
       `${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/products/${encodeURIComponent(productId)}/start`,
-      { method: "POST" }
+      { method: "POST", headers: getAuthHeaders(session) }
     );
     const data = await readJson<AuctionSnapshot & { message?: string }>(res);
 
@@ -1097,7 +1266,7 @@ export function App() {
     try {
       const res = await fetch(
         `${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/products/${encodeURIComponent(productId)}/ai-script`,
-        { method: "POST" }
+        { method: "POST", headers: getAuthHeaders(session) }
       );
       const data = await readJson<AiResult>(res);
 
@@ -1507,7 +1676,63 @@ export function App() {
             <section className="panel-section import-panel">
               <div className="section-title">
                 <Upload size={18} />
-                <h2>商品导入</h2>
+                <h2>商品管理</h2>
+              </div>
+              <div className="product-form">
+                <label className="field">
+                  <span>商品名称</span>
+                  <input value={productForm.name} onChange={(event) => updateProductForm("name", event.target.value)} />
+                </label>
+                <label className="field">
+                  <span>商品图片 URL</span>
+                  <input value={productForm.imageUrl} placeholder="/static/jewelry.jpg 或 https://..." onChange={(event) => updateProductForm("imageUrl", event.target.value)} />
+                </label>
+                <label className="field product-form-wide">
+                  <span>商品描述</span>
+                  <input value={productForm.description} onChange={(event) => updateProductForm("description", event.target.value)} />
+                </label>
+                <label className="field">
+                  <span>起拍价</span>
+                  <input type="number" min={0} value={productForm.startPrice} onChange={(event) => updateProductForm("startPrice", event.target.value)} />
+                </label>
+                <label className="field">
+                  <span>最低加价</span>
+                  <input type="number" min={1} value={productForm.incrementStep} onChange={(event) => updateProductForm("incrementStep", event.target.value)} />
+                </label>
+                <label className="field">
+                  <span>封顶价</span>
+                  <input type="number" min={1} value={productForm.ceilingPrice} onChange={(event) => updateProductForm("ceilingPrice", event.target.value)} />
+                </label>
+                <label className="field">
+                  <span>竞拍时长秒</span>
+                  <input type="number" min={15} max={600} value={productForm.durationSeconds} onChange={(event) => updateProductForm("durationSeconds", event.target.value)} />
+                </label>
+                <label className="field">
+                  <span>库存</span>
+                  <input type="number" min={1} value={productForm.stock} onChange={(event) => updateProductForm("stock", event.target.value)} />
+                </label>
+                <label className="field">
+                  <span>商品卖点</span>
+                  <input value={productForm.sellingPoints} onChange={(event) => updateProductForm("sellingPoints", event.target.value)} />
+                </label>
+                <label className="field product-form-wide">
+                  <span>讲解关键词</span>
+                  <input value={productForm.scriptKeywords} onChange={(event) => updateProductForm("scriptKeywords", event.target.value)} />
+                </label>
+              </div>
+              <div className="button-row">
+                <button className="primary-button" disabled={savingProduct} onClick={saveProductForm}>
+                  <Save size={16} />
+                  <span>{savingProduct ? "保存中" : editingProductId ? "保存修改" : "新增商品"}</span>
+                </button>
+                <button onClick={clearProductForm}>
+                  <RotateCcw size={16} />
+                  <span>清空表单</span>
+                </button>
+                <button disabled={resettingDemo} onClick={resetDemoData}>
+                  <Trash2 size={16} />
+                  <span>{resettingDemo ? "重置中" : "重置演示数据"}</span>
+                </button>
               </div>
               <input
                 ref={fileInputRef}
@@ -1614,11 +1839,39 @@ export function App() {
                           <PlayCircle size={16} />
                         </button>
                         <button
+                          disabled={item.product.queueStatus === "ACTIVE"}
+                          title="编辑商品"
+                          onClick={() => editProductFromQueue(item)}
+                        >
+                          <Pencil size={16} />
+                        </button>
+                        <button
+                          disabled={item.product.queueStatus === "ACTIVE"}
+                          title="上移"
+                          onClick={() => moveProduct(item.product.id, -1)}
+                        >
+                          ↑
+                        </button>
+                        <button
+                          disabled={item.product.queueStatus === "ACTIVE"}
+                          title="下移"
+                          onClick={() => moveProduct(item.product.id, 1)}
+                        >
+                          ↓
+                        </button>
+                        <button
                           disabled={aiLoading}
                           title="重新生成讲解词"
                           onClick={() => regenerateProductScript(item.product.id)}
                         >
                           <Sparkles size={16} />
+                        </button>
+                        <button
+                          disabled={item.product.queueStatus === "ACTIVE"}
+                          title="下架商品"
+                          onClick={() => archiveProduct(item.product.id)}
+                        >
+                          <Trash2 size={16} />
                         </button>
                       </div>
                     </div>
@@ -2321,6 +2574,36 @@ function Metric(props: { label: string; value: string }) {
 
 function isVisibleDanmaku(item: DanmakuMessage, liveRoomId: string) {
   return item.liveRoomId === liveRoomId && (item.status ?? "VISIBLE") === "VISIBLE";
+}
+
+function createEmptyProductForm(): ProductFormInput {
+  return {
+    name: "",
+    description: "",
+    imageUrl: "",
+    startPrice: "0",
+    incrementStep: "100",
+    ceilingPrice: "3000",
+    durationSeconds: "90",
+    stock: "1",
+    sellingPoints: "",
+    scriptKeywords: ""
+  };
+}
+
+function productToForm(item: ProductQueueItem): ProductFormInput {
+  return {
+    name: item.product.name,
+    description: item.product.description,
+    imageUrl: item.product.imageUrl,
+    startPrice: String(item.product.startPrice ?? item.auction.startPrice),
+    incrementStep: String(item.product.incrementStep ?? item.auction.incrementStep),
+    ceilingPrice: String(item.product.ceilingPrice ?? item.auction.ceilingPrice),
+    durationSeconds: String(item.product.durationSeconds ?? item.auction.durationSeconds),
+    stock: String(item.product.stock ?? 1),
+    sellingPoints: item.product.sellingPoints ?? "",
+    scriptKeywords: item.product.scriptKeywords ?? ""
+  };
 }
 
 function getDanmakuSender(input: {
