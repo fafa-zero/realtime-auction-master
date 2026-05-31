@@ -1,63 +1,199 @@
-.header {
+.index-page {
+  padding-bottom: 56rpx;
+}
+
+.hero-panel {
   display: grid;
-  gap: 10rpx;
-  margin-bottom: 28rpx;
+  gap: 14rpx;
+  margin-bottom: 24rpx;
+  padding: 34rpx 30rpx;
+  border: 1rpx solid #d9e1e7;
+  border-radius: 12rpx;
+  background: #ffffff;
 }
 
 .title {
-  font-size: 48rpx;
+  display: block;
+  margin-top: 8rpx;
+  font-size: 50rpx;
   font-weight: 900;
+  line-height: 1.18;
+}
+
+.status-pill {
+  justify-self: start;
+  min-width: 112rpx;
+  padding: 8rpx 18rpx;
+  border: 1rpx solid #d9e1e7;
+  border-radius: 999rpx;
+  color: #60717f;
+  background: #f7f9fb;
+  font-size: 24rpx;
+  font-weight: 800;
+  text-align: center;
+}
+
+.status-pill.online {
+  border-color: #b9ead9;
+  color: #12805c;
+  background: #eaf8f2;
+}
+
+.api-line {
+  color: #83909b;
+  font-size: 22rpx;
+  line-height: 1.5;
 }
 
 .login-card {
   display: grid;
-  gap: 18rpx;
-  margin-bottom: 24rpx;
-  padding: 28rpx;
+  gap: 22rpx;
+  margin-bottom: 22rpx;
+  padding: 30rpx;
   border: 1rpx solid #d9e1e7;
   border-radius: 12rpx;
   background: #ffffff;
+  box-shadow: 0 18rpx 42rpx rgba(23, 33, 43, 0.06);
+}
+
+.login-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20rpx;
 }
 
 .login-title {
   display: block;
   margin-bottom: 8rpx;
-  font-size: 34rpx;
+  font-size: 38rpx;
   font-weight: 900;
+  line-height: 1.25;
 }
 
-.login-card input {
-  width: 100%;
-  height: 88rpx;
-  padding: 0 20rpx;
-  border: 1rpx solid #d9e1e7;
-  border-radius: 12rpx;
-  background: #fbfcfd;
+.login-subtitle {
+  display: block;
+  color: #60717f;
+  font-size: 25rpx;
+  line-height: 1.5;
+}
+
+.account-badge {
+  flex: 0 0 auto;
+  padding: 8rpx 14rpx;
+  border-radius: 8rpx;
+  color: #d82f44;
+  background: #fff0f2;
+  font-size: 22rpx;
+  font-weight: 900;
 }
 
 .auth-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10rpx;
+  gap: 8rpx;
   padding: 8rpx;
+  border: 1rpx solid #dfe6eb;
   border-radius: 12rpx;
   background: #edf1f4;
 }
 
 .auth-tab {
-  min-height: 68rpx;
+  min-height: 72rpx;
   margin: 0;
   border: 0;
   border-radius: 10rpx;
   background: transparent;
   color: #60717f;
-  font-size: 26rpx;
-  line-height: 68rpx;
+  font-size: 27rpx;
+  line-height: 72rpx;
 }
 
 .auth-tab.active {
-  background: #ffffff;
   color: #17212b;
+  background: #ffffff;
+  box-shadow: 0 8rpx 22rpx rgba(23, 33, 43, 0.08);
+}
+
+.form-stack {
+  display: grid;
+  gap: 18rpx;
+}
+
+.field-block {
+  display: grid;
+  gap: 10rpx;
+}
+
+.field-label {
+  color: #394856;
+  font-size: 24rpx;
+  font-weight: 800;
+}
+
+.field-block input {
+  width: 100%;
+  height: 92rpx;
+  padding: 0 22rpx;
+  border: 1rpx solid #d9e1e7;
+  border-radius: 12rpx;
+  color: #17212b;
+  background: #fbfcfd;
+  font-size: 28rpx;
+}
+
+.auth-submit {
+  margin-top: 2rpx;
+}
+
+.auth-submit[disabled] {
+  color: rgba(255, 255, 255, 0.78);
+  background: #e4939d;
+}
+
+.session-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+  padding-top: 18rpx;
+  border-top: 1rpx solid #d9e1e7;
+}
+
+.session-label {
+  display: block;
+  margin-bottom: 8rpx;
+  color: #60717f;
+  font-size: 22rpx;
+}
+
+.session-name {
+  display: block;
+  font-size: 32rpx;
+  font-weight: 900;
+}
+
+.compact-button {
+  min-width: 128rpx;
+  min-height: 70rpx;
+  margin: 0;
+  padding: 0 20rpx;
+  font-size: 24rpx;
+  line-height: 70rpx;
+}
+
+.rooms-section {
+  display: grid;
+  gap: 18rpx;
+}
+
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #394856;
+  font-size: 26rpx;
+  font-weight: 900;
 }
 
 .room-card {
@@ -65,7 +201,6 @@
   align-items: center;
   justify-content: space-between;
   gap: 20rpx;
-  margin-bottom: 18rpx;
   padding: 28rpx;
   border: 1rpx solid #d9e1e7;
   border-radius: 12rpx;
@@ -77,6 +212,7 @@
   margin-bottom: 10rpx;
   font-size: 34rpx;
   font-weight: 900;
+  line-height: 1.35;
 }
 
 .room-meta,
@@ -86,6 +222,7 @@
 }
 
 .room-id {
+  flex: 0 0 auto;
   font-weight: 800;
 }
 

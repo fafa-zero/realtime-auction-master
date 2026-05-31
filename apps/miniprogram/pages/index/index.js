@@ -25,19 +25,23 @@ Page({
     error: "",
     success: "",
     rooms: fallbackRooms,
-    nickname: "演示买家",
+    account: "",
+    password: "",
+    nickname: "",
     userText: "请先登录",
     apiText: `后端：${getApiBaseUrl()}`
   },
 
   async onShow() {
     const app = getApp();
-    const storedNickname = wx.getStorageSync("auction_nickname") || app.globalData.user?.nickname || "演示买家";
+    const storedAccount = wx.getStorageSync("auction_account") || app.globalData.user?.account || "";
+    const storedNickname = wx.getStorageSync("auction_nickname") || app.globalData.user?.nickname || "";
 
     this.setData({
       loading: false,
       error: "",
       success: "",
+      account: storedAccount,
       nickname: storedNickname
     });
 
@@ -46,7 +50,7 @@ Page({
         await app.ensureLogin();
         this.setData({
           loggedIn: true,
-          userText: `当前用户：${app.globalData.user.nickname}`
+          userText: `当前买家：${app.globalData.user.nickname}`
         });
         this.load();
       } catch {
@@ -68,6 +72,14 @@ Page({
     this.setData({ nickname: event.detail.value });
   },
 
+  onAccountInput(event) {
+    this.setData({ account: event.detail.value });
+  },
+
+  onPasswordInput(event) {
+    this.setData({ password: event.detail.value });
+  },
+
   setAuthMode(event) {
     this.setData({
       authMode: event.currentTarget.dataset.mode,
@@ -77,14 +89,23 @@ Page({
   },
 
   async loginBuyer() {
-    const nickname = String(this.data.nickname || "").trim() || "演示买家";
+    const account = String(this.data.account || "").trim();
+    const password = String(this.data.password || "").trim();
+
+    if (!account || !password) {
+      this.setData({ error: "请输入账号和密码" });
+      return;
+    }
+
     this.setData({ loggingIn: true, error: "", success: "" });
 
     try {
-      const result = await getApp().loginBuyer({ nickname });
+      const result = await getApp().loginBuyer({ account, password });
       this.setData({
         loggedIn: true,
-        userText: `当前用户：${result.user.nickname}`,
+        userText: `当前买家：${result.user.nickname}`,
+        account: result.user.account || account,
+        password: "",
         nickname: result.user.nickname
       });
       await this.load();
@@ -96,15 +117,25 @@ Page({
   },
 
   async registerBuyer() {
-    const nickname = String(this.data.nickname || "").trim() || "演示买家";
+    const account = String(this.data.account || "").trim();
+    const password = String(this.data.password || "").trim();
+    const nickname = String(this.data.nickname || "").trim();
+
+    if (!account || !password || !nickname) {
+      this.setData({ error: "请输入账号、密码和买家昵称" });
+      return;
+    }
+
     this.setData({ registering: true, error: "", success: "" });
 
     try {
-      const result = await getApp().registerBuyer({ nickname });
+      const result = await getApp().registerBuyer({ account, password, nickname });
       this.setData({
         authMode: "login",
+        account: result.user.account || account,
+        password: "",
         nickname: result.user.nickname,
-        success: `买家 ${result.user.nickname} 注册成功，请登录后进入专场`
+        success: `买家账号 ${result.user.account || account} 注册成功，请登录后进入专场`
       });
     } catch (error) {
       this.setData({ error: error.message || "注册失败" });
@@ -118,6 +149,7 @@ Page({
     this.setData({
       loggedIn: false,
       success: "",
+      password: "",
       userText: "请先登录后进入专场",
       rooms: fallbackRooms
     });
@@ -137,7 +169,7 @@ Page({
 
       this.setData({
         rooms: data.items || fallbackRooms,
-        userText: app.globalData.user ? `当前用户：${app.globalData.user.nickname}` : "演示登录用户",
+        userText: app.globalData.user ? `当前买家：${app.globalData.user.nickname}` : "买家已登录",
         apiText: `后端：${app.globalData.apiBaseUrl}`
       });
     } catch (error) {
@@ -145,7 +177,7 @@ Page({
         rooms: fallbackRooms,
         error: "",
         success: "",
-        userText: "演示登录用户",
+        userText: "买家已登录",
         apiText: `后端：${getApp().globalData.apiBaseUrl}，列表使用本地兜底`
       });
     } finally {

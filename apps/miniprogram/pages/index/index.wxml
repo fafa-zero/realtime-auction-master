@@ -1,19 +1,28 @@
-<view class="page">
-  <view class="header">
-    <text class="eyebrow">好物助手</text>
-    <text class="title">选择好物专场</text>
+<view class="page index-page">
+  <view class="hero-panel">
+    <view>
+      <text class="eyebrow">好物助手</text>
+      <text class="title">买家账号入口</text>
+    </view>
+    <view class="status-pill {{loggedIn ? 'online' : ''}}">
+      {{loggedIn ? "已登录" : "未登录"}}
+    </view>
     <text class="muted">{{userText}}</text>
-    <text class="muted">{{apiText}}</text>
+    <text class="api-line">{{apiText}}</text>
   </view>
 
   <view class="login-card">
-    <view>
-      <text class="login-title">{{authMode === "register" ? "买家注册" : "买家登录"}}</text>
-      <text class="muted">
-        {{authMode === "register" ? "先注册买家账号，注册成功后再登录进入专场。" : "使用已注册买家账号登录后进入好物专场。"}}
-      </text>
+    <view class="login-heading">
+      <view>
+        <text class="login-title">{{authMode === "register" ? "注册买家账号" : "登录买家账号"}}</text>
+        <text class="login-subtitle">
+          {{authMode === "register" ? "新买家账号" : "已注册买家账号"}}
+        </text>
+      </view>
+      <text class="account-badge">BUYER</text>
     </view>
-    <view class="auth-tabs">
+
+    <view class="auth-tabs" wx:if="{{!loggedIn}}">
       <button
         class="auth-tab {{authMode === 'login' ? 'active' : ''}}"
         data-mode="login"
@@ -29,36 +38,73 @@
         注册
       </button>
     </view>
-    <input
-      value="{{nickname}}"
-      placeholder="请输入买家昵称"
-      bindinput="onNicknameInput"
-      disabled="{{loggedIn}}"
-    />
+
+    <view wx:if="{{!loggedIn}}" class="form-stack">
+      <view class="field-block">
+        <text class="field-label">账号</text>
+        <input
+          value="{{account}}"
+          placeholder="请输入账号"
+          bindinput="onAccountInput"
+        />
+      </view>
+      <view wx:if="{{authMode === 'register'}}" class="field-block">
+        <text class="field-label">买家昵称</text>
+        <input
+          value="{{nickname}}"
+          maxlength="40"
+          placeholder="请输入买家昵称"
+          bindinput="onNicknameInput"
+        />
+      </view>
+      <view class="field-block">
+        <text class="field-label">密码</text>
+        <input
+          value="{{password}}"
+          password="{{true}}"
+          placeholder="请输入账号密码"
+          bindinput="onPasswordInput"
+        />
+      </view>
+    </view>
+
     <button
       wx:if="{{!loggedIn && authMode === 'login'}}"
-      class="primary"
+      class="primary auth-submit"
       loading="{{loggingIn}}"
+      disabled="{{loggingIn || !account || !password}}"
       bindtap="loginBuyer"
     >
       登录进入专场
     </button>
     <button
       wx:elif="{{!loggedIn && authMode === 'register'}}"
-      class="primary"
+      class="primary auth-submit"
       loading="{{registering}}"
+      disabled="{{registering || !account || !password || !nickname}}"
       bindtap="registerBuyer"
     >
       注册买家账号
     </button>
-    <button wx:else class="secondary" bindtap="logout">取消登录</button>
+
+    <view wx:else class="session-row">
+      <view>
+        <text class="session-label">当前买家</text>
+        <text class="session-name">{{nickname}}</text>
+      </view>
+      <button class="secondary compact-button" bindtap="logout">退出</button>
+    </view>
   </view>
 
   <view wx:if="{{success}}" class="card success">{{success}}</view>
   <view wx:if="{{loading}}" class="card muted">正在加载专场...</view>
   <view wx:elif="{{error}}" class="card error">{{error}}</view>
 
-  <view wx:elif="{{loggedIn}}">
+  <view wx:elif="{{loggedIn}}" class="rooms-section">
+    <view class="section-heading">
+      <text>可进入专场</text>
+      <text>{{rooms.length}} 个</text>
+    </view>
     <view
       wx:for="{{rooms}}"
       wx:key="id"

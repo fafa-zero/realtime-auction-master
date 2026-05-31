@@ -137,65 +137,36 @@ function requestWithFallback(baseUrls, path, options, headers) {
   });
 }
 
-function getMockCode() {
-  let mockCode = wx.getStorageSync("auction_mock_code");
-
-  if (!mockCode) {
-    mockCode = `mock-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    wx.setStorageSync("auction_mock_code", mockCode);
-  }
-
-  return mockCode;
-}
-
-function getWechatLoginCode() {
-  return new Promise((resolve) => {
-    if (!wx.login) {
-      resolve("");
-      return;
-    }
-
-    wx.login({
-      success(result) {
-        resolve(result.code || "");
-      },
-      fail() {
-        resolve("");
-      }
-    });
-  });
-}
-
-async function getMiniprogramAuthData(input = {}) {
-  const code = await getWechatLoginCode();
-  const data = {
-    nickname: input.nickname || "小程序用户",
-    avatarUrl: input.avatarUrl || ""
+function getSharedBuyerAuthData(input = {}) {
+  return {
+    account: String(input.account || "").trim(),
+    password: String(input.password || "").trim(),
+    nickname: String(input.nickname || input.account || "").trim()
   };
-
-  if (code) {
-    return { ...data, code };
-  }
-
-  return { ...data, mockCode: getMockCode() };
 }
 
-async function registerBuyer(input = {}) {
-  const data = await getMiniprogramAuthData(input);
+function registerBuyer(input = {}) {
+  const data = getSharedBuyerAuthData(input);
 
-  return request("/api/auth/miniprogram/register", {
+  return request("/api/auth/web/register", {
     method: "POST",
-    data,
+    data: {
+      ...data,
+      role: "BUYER"
+    },
     token: ""
   });
 }
 
-async function loginBuyer(input = {}) {
-  const data = await getMiniprogramAuthData(input);
+function loginBuyer(input = {}) {
+  const data = getSharedBuyerAuthData(input);
 
-  return request("/api/auth/miniprogram/login", {
+  return request("/api/auth/web/login", {
     method: "POST",
-    data,
+    data: {
+      account: data.account,
+      password: data.password
+    },
     token: ""
   });
 }

@@ -38,8 +38,8 @@ Web 页面和小程序必须连到同一个 `4300` 后端实例，才能共享�
 - `pages/index`：好物专场列表。
 - `pages/live/index`：专场详情、商品画面、实时快照、参与金额、确认后模拟支付。
 - `pages/orders/index`：我的订单。
-- 登录优先使用 `wx.login()` 获取微信 code，后端配置小程序 AppID/Secret 后换取 openid；本地未配置时自动回落到稳定演示身份。
-- 首页区分买家注册和买家登录；注册只创建账号，登录才进入专场。
+- 小程序买家登录和注册复用 Web 账号体系，统一调用 `/api/auth/web/register` 和 `/api/auth/web/login`。
+- 首页区分买家注册和买家登录；注册需要账号、密码和买家昵称，登录需要账号和密码。
 - 详情页使用 REST 轮询同步，出价也走 HTTP 接口，避免微信开发者工具 WebSocket timeout 阻断演示。
 
 ## 生产边界
