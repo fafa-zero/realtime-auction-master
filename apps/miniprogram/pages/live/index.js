@@ -1,10 +1,12 @@
 const {
   getApiBaseUrl,
   getAuctionSnapshot,
+  getDanmakuMessages,
   getLiveRoom,
   getMyOrders,
   payOrder,
-  placeBid
+  placeBid,
+  sendDanmaku
 } = require("../../utils/api");
 const { money, remaining, time } = require("../../utils/format");
 
@@ -98,7 +100,11 @@ Page({
     ruleText: "起拍价 ¥0 / 最低加价 ¥0 / 封顶价 ¥0",
     realtimeText: "实时连接准备中",
     debugText: "",
-    canBid: false
+    canBid: false,
+    danmakuText: "",
+    danmakuMessages: [],
+    stageDanmakuMessages: [],
+    sendingDanmaku: false
   },
 
   async onLoad(options) {
@@ -152,6 +158,7 @@ Page({
 
       this.applySnapshot(snapshot);
       this.setData({ room: roomData.room });
+      this.loadDanmakuHistory();
     } catch (error) {
       this.setData({
         error: "",
@@ -215,6 +222,7 @@ Page({
     try {
       const snapshot = await getAuctionSnapshot(this.data.liveRoomId);
       this.applySnapshot(snapshot);
+      this.loadDanmakuHistory();
       this.setData({
         realtimeText: `轮询同步中：${getApiBaseUrl()}`,
         debugText: `最近同步成功 ${time(Date.now())}`
@@ -228,6 +236,26 @@ Page({
     } finally {
       this.snapshotLoading = false;
     }
+  },
+
+  async loadDanmakuHistory() {
+    try {
+      const data = await getDanmakuMessages(this.data.liveRoomId);
+      const messages = this.formatDanmakuMessages(data.items || []);
+      this.setData({
+        danmakuMessages: messages,
+        stageDanmakuMessages: messages.slice(0, 5)
+      });
+    } catch {
+      // 弹幕不影响竞拍主流程。
+    }
+  },
+
+  formatDanmakuMessages(items) {
+    return items.slice(0, 20).map((item) => ({
+      ...item,
+      createdAtText: time(item.createdAt)
+    }));
   },
 
   usePollingRealtime() {
@@ -371,6 +399,47 @@ Page({
   onBidInput(event) {
     this.setData({ bidPrice: event.detail.value });
     this.refreshComputed();
+  },
+
+  onDanmakuInput(event) {
+    this.setData({ danmakuText: event.detail.value });
+  },
+
+  async submitDanmaku() {
+    const content = String(this.data.danmakuText || "").trim();
+
+    if (!content) {
+      this.showHint("请输入弹幕内容");
+      return;
+    }
+
+    if (content.length > 80) {
+      this.showHint("弹幕内容不能超过 80 个字符");
+      return;
+    }
+
+    this.setData({ sendingDanmaku: true });
+
+    try {
+      await getApp().ensureLogin();
+      const result = await sendDanmaku(this.data.liveRoomId, { content });
+      const message = {
+        ...result.message,
+        createdAtText: time(result.message.createdAt)
+      };
+      const messages = [message, ...this.data.danmakuMessages].slice(0, 20);
+
+      this.setData({
+        danmakuText: "",
+        danmakuMessages: messages,
+        stageDanmakuMessages: messages.slice(0, 5),
+        debugText: "弹幕发送成功"
+      });
+    } catch (error) {
+      this.showHint(error.message || "弹幕发送失败");
+    } finally {
+      this.setData({ sendingDanmaku: false });
+    }
   },
 
   async submitBid() {

@@ -46,6 +46,15 @@ export interface BidRisk {
   reasons: string[];
 }
 
+export interface DanmakuMessage {
+  id: string;
+  liveRoomId: string;
+  userId: string;
+  nickname: string;
+  content: string;
+  createdAt: number;
+}
+
 export interface Order {
   id: string;
   auctionId: string;

@@ -216,6 +216,17 @@ function getAuctionSnapshot(liveRoomId) {
   return request(`/api/live-rooms/${encodeURIComponent(liveRoomId)}/auction`);
 }
 
+function getDanmakuMessages(liveRoomId) {
+  return request(`/api/live-rooms/${encodeURIComponent(liveRoomId)}/danmaku`);
+}
+
+function sendDanmaku(liveRoomId, input) {
+  return request(`/api/live-rooms/${encodeURIComponent(liveRoomId)}/danmaku`, {
+    method: "POST",
+    data: input
+  });
+}
+
 function placeBid(liveRoomId, input) {
   return request(`/api/live-rooms/${encodeURIComponent(liveRoomId)}/auction/bids`, {
     method: "POST",
@@ -238,6 +249,7 @@ module.exports = {
   getAuctionSnapshot,
   getApiBaseUrl,
   getApiBaseUrlCandidates,
+  getDanmakuMessages,
   getDefaultApiBaseUrl,
   getMe,
   getLiveRoom,
@@ -248,5 +260,6 @@ module.exports = {
   placeBid,
   registerBuyer,
   request,
+  sendDanmaku,
   setApiBaseUrl
 };

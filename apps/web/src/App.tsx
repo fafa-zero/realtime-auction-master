@@ -32,6 +32,7 @@ import type {
   AuctionSnapshot,
   AuctionStatus,
   AuthUser,
+  DanmakuMessage,
   LiveRoom,
   Order,
   BidRisk,
@@ -159,6 +160,9 @@ export function App() {
   const [historyItems, setHistoryItems] = useState<AuctionHistoryItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [productQueue, setProductQueue] = useState<ProductQueueItem[]>([]);
+  const [danmakuMessages, setDanmakuMessages] = useState<DanmakuMessage[]>([]);
+  const [danmakuText, setDanmakuText] = useState("");
+  const [sendingDanmaku, setSendingDanmaku] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [importingProducts, setImportingProducts] = useState(false);
   const [authMessage, setAuthMessage] = useState("");
@@ -231,6 +235,7 @@ export function App() {
     let cancelled = false;
     setSnapshot(null);
     setLiveRoom(null);
+    setDanmakuMessages([]);
     setLoadError(null);
     setConnected(false);
     setMessage(`正在进入直播间 ${liveRoomId}...`);
@@ -316,6 +321,22 @@ export function App() {
     };
 
     socket.on("auction:snapshot", updateSnapshot);
+    socket.on("danmaku:history", (items: DanmakuMessage[]) => {
+      setDanmakuMessages((items ?? []).filter((item) => item.liveRoomId === liveRoomId).slice(0, 80));
+    });
+    socket.on("danmaku:new", (item: DanmakuMessage) => {
+      if (item.liveRoomId !== liveRoomId) {
+        return;
+      }
+
+      setDanmakuMessages((current) => {
+        if (current.some((message) => message.id === item.id)) {
+          return current;
+        }
+
+        return [item, ...current].slice(0, 80);
+      });
+    });
     socket.on("auction:started", (data: AuctionSnapshot) => {
       if (updateSnapshot(data)) {
         setMessage("竞拍已开始");
@@ -651,6 +672,49 @@ export function App() {
             ? `${input.nickname} 出价 ${formatMoney(input.price)}，风控提示：${response.risk.reasons.join("；")}`
             : `${input.nickname} 出价 ${formatMoney(input.price)}，等待广播同步`
         );
+      }
+    );
+  }
+
+  function sendDanmaku(event?: React.FormEvent) {
+    event?.preventDefault();
+
+    if (!socketRef.current || sendingDanmaku) {
+      return;
+    }
+
+    const content = danmakuText.trim();
+
+    if (!content) {
+      setMessage("请输入弹幕内容");
+      return;
+    }
+
+    if (content.length > 80) {
+      setMessage("弹幕内容不能超过 80 个字符");
+      return;
+    }
+
+    setSendingDanmaku(true);
+    socketRef.current.emit(
+      "danmaku:send",
+      {
+        liveRoomId,
+        userId,
+        nickname,
+        token: session?.token,
+        content
+      },
+      (response: { ok: boolean; message?: DanmakuMessage | string }) => {
+        setSendingDanmaku(false);
+
+        if (!response.ok) {
+          setMessage(typeof response.message === "string" ? response.message : "弹幕发送失败");
+          return;
+        }
+
+        setDanmakuText("");
+        setMessage("弹幕已发送");
       }
     );
   }
@@ -993,6 +1057,22 @@ export function App() {
             LIVE
           </div>
           <img src={snapshot.product.imageUrl} alt={snapshot.product.name} />
+          <div className="danmaku-overlay" aria-live="polite">
+            {danmakuMessages.slice(0, 10).map((item, index) => (
+              <div
+                className="danmaku-fly"
+                key={item.id}
+                style={{
+                  top: `${14 + (index % 6) * 12}%`,
+                  animationDelay: `${(index % 5) * -1.4}s`,
+                  animationDuration: `${10 + (index % 4)}s`
+                }}
+              >
+                <span>{item.nickname}</span>
+                {item.content}
+              </div>
+            ))}
+          </div>
           <div className="live-overlay">
             <p>{liveRoom ? `${liveRoom.hostName} / ${liveRoom.id}` : "抖音电商直播模拟"}</p>
             <strong>{snapshot.product.name}</strong>
@@ -1006,6 +1086,18 @@ export function App() {
             </div>
           </div>
         </div>
+
+        <form className="danmaku-bar" onSubmit={sendDanmaku}>
+          <input
+            value={danmakuText}
+            maxLength={80}
+            placeholder="发一条弹幕互动"
+            onChange={(event) => setDanmakuText(event.target.value)}
+          />
+          <button disabled={!connected || sendingDanmaku || !danmakuText.trim()}>
+            {sendingDanmaku ? "发送中" : "发送弹幕"}
+          </button>
+        </form>
 
         <div className="product-strip">
           <div>

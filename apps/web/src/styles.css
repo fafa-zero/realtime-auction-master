@@ -356,6 +356,50 @@ h2 {
   background: linear-gradient(180deg, rgb(0 0 0 / 0.08), rgb(0 0 0 / 0.6));
 }
 
+.danmaku-overlay {
+  position: absolute;
+  z-index: 3;
+  inset: 54px 0 96px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.danmaku-fly {
+  position: absolute;
+  left: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: min(68vw, 720px);
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.42);
+  box-shadow: 0 8px 18px rgb(0 0 0 / 0.2);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.35;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.5);
+  white-space: nowrap;
+  animation: danmaku-scroll 11s linear infinite;
+}
+
+.danmaku-fly span {
+  color: #ffd6dc;
+}
+
+@keyframes danmaku-scroll {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(calc(-100vw - 100%));
+  }
+}
+
 .live-badge {
   position: absolute;
   z-index: 2;
@@ -403,6 +447,36 @@ h2 {
   color: rgb(255 255 255 / 0.9);
   font-size: 13px;
   font-weight: 700;
+}
+
+.danmaku-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.danmaku-bar input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+  color: var(--ink);
+  background: #fbfcfd;
+}
+
+.danmaku-bar button {
+  min-width: 112px;
+  padding: 0 14px;
+  border-color: var(--accent);
+  color: #fff;
+  background: var(--accent);
+  font-weight: 800;
 }
 
 .product-strip,
@@ -1264,6 +1338,23 @@ h2 {
   .live-stage,
   .live-stage img {
     min-height: 360px;
+  }
+
+  .danmaku-overlay {
+    inset: 48px 0 108px;
+  }
+
+  .danmaku-fly {
+    max-width: 86vw;
+    font-size: 13px;
+  }
+
+  .danmaku-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .danmaku-bar button {
+    width: 100%;
   }
 
   .stats-grid,

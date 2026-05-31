@@ -13,7 +13,8 @@ import type {
   ProductQueueStatus,
   Session,
   User,
-  BidRisk
+  BidRisk,
+  DanmakuMessage
 } from "./types.js";
 
 const DATA_FILE = resolve(process.env.AUCTION_DATA_FILE ?? "data/auction-state.json");
@@ -80,6 +81,7 @@ const history: AuctionHistoryItem[] = [];
 const orders: Order[] = [];
 const users: User[] = [];
 const sessions: Session[] = [];
+const danmakuMessages: DanmakuMessage[] = [];
 
 loadState();
 ensureDemoWebAccounts();
@@ -129,6 +131,7 @@ const RISK_HIGH_FREQUENCY_BID_LIMIT = 5;
 const RISK_REPEAT_BID_LIMIT = 3;
 const RISK_LARGE_JUMP_MULTIPLIER = 5;
 const RISK_EXTREME_JUMP_MULTIPLIER = 10;
+const DANMAKU_HISTORY_LIMIT = 80;
 
 export function getLiveRooms() {
   return liveRooms.map((room) => enrichLiveRoom(room));
@@ -185,6 +188,40 @@ export function getOrders(liveRoomId?: string) {
 
 export function getOrdersForUser(userId: string, liveRoomId?: string) {
   return getOrders(liveRoomId).filter((order) => order.buyerUserId === userId);
+}
+
+export function getDanmakuMessages(liveRoomId = DEFAULT_LIVE_ROOM_ID) {
+  requireLiveRoom(liveRoomId);
+
+  return danmakuMessages
+    .filter((message) => message.liveRoomId === liveRoomId)
+    .slice(0, DANMAKU_HISTORY_LIMIT)
+    .map((message) => ({ ...message }));
+}
+
+export function sendDanmakuMessage(input: {
+  liveRoomId: string;
+  userId: string;
+  nickname: string;
+  content: string;
+}) {
+  requireLiveRoom(input.liveRoomId);
+  const content = normalizeDanmakuContent(input.content);
+  const nickname = input.nickname.trim() || "匿名用户";
+  const message: DanmakuMessage = {
+    id: randomUUID(),
+    liveRoomId: input.liveRoomId,
+    userId: input.userId,
+    nickname: nickname.slice(0, 40),
+    content,
+    createdAt: Date.now()
+  };
+
+  danmakuMessages.unshift(message);
+  trimDanmakuMessages(input.liveRoomId);
+  saveState();
+
+  return { ...message };
 }
 
 export function getOrder(orderId: string) {
@@ -1174,7 +1211,8 @@ function saveState() {
         auctions,
         bids,
         orders,
-        history
+        history,
+        danmakuMessages
       },
       null,
       2
@@ -1193,6 +1231,7 @@ function loadState() {
       bids?: Bid[];
       orders?: Order[];
       history?: AuctionHistoryItem[];
+      danmakuMessages?: DanmakuMessage[];
       auction?: Partial<Auction>;
       order?: Order | null;
     };
@@ -1232,6 +1271,13 @@ function loadState() {
 
     if (Array.isArray(data.history)) {
       history.splice(0, history.length, ...data.history.slice(0, 20));
+    }
+
+    if (Array.isArray(data.danmakuMessages)) {
+      danmakuMessages.splice(0, danmakuMessages.length, ...data.danmakuMessages);
+      for (const liveRoom of liveRooms) {
+        trimDanmakuMessages(liveRoom.id);
+      }
     }
   } catch {
     // Missing or invalid state file falls back to the seeded demo data.
@@ -1290,6 +1336,32 @@ function updateUserProfile(user: User, input: { nickname?: string; avatarUrl?: s
 
   if (input.avatarUrl !== undefined) {
     user.avatarUrl = input.avatarUrl;
+  }
+}
+
+function normalizeDanmakuContent(content: string) {
+  const normalized = content.replace(/\s+/g, " ").trim();
+
+  if (!normalized) {
+    throw new Error("弹幕内容不能为空");
+  }
+
+  if (normalized.length > 80) {
+    throw new Error("弹幕内容不能超过 80 个字符");
+  }
+
+  return normalized;
+}
+
+function trimDanmakuMessages(liveRoomId: string) {
+  const roomMessages = danmakuMessages.filter((message) => message.liveRoomId === liveRoomId);
+
+  for (const message of roomMessages.slice(DANMAKU_HISTORY_LIMIT)) {
+    const index = danmakuMessages.findIndex((item) => item.id === message.id);
+
+    if (index >= 0) {
+      danmakuMessages.splice(index, 1);
+    }
   }
 }
 

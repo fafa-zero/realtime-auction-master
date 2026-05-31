@@ -13,6 +13,7 @@ import {
   generateProductScript,
   getAuction,
   getSnapshot,
+  getDanmakuMessages,
   getLiveRoom,
   getLiveRooms,
   getOrder,
@@ -27,6 +28,7 @@ import {
   placeBid,
   registerMiniprogram,
   registerWebUser,
+  sendDanmakuMessage,
   settleAuction,
   startAuction,
   startProductAuction,
@@ -238,6 +240,35 @@ app.get("/api/live-rooms/:liveRoomId/products", (req, res) => {
     });
   } catch (error) {
     res.status(404).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
+app.get("/api/live-rooms/:liveRoomId/danmaku", (req, res) => {
+  try {
+    assertLiveRoom(req.params.liveRoomId);
+    res.json({
+      ok: true,
+      items: getDanmakuMessages(req.params.liveRoomId)
+    });
+  } catch (error) {
+    res.status(404).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
+app.post("/api/live-rooms/:liveRoomId/danmaku", (req, res) => {
+  try {
+    assertLiveRoom(req.params.liveRoomId);
+    const authUser = getOptionalAuthUser(req);
+    const input = parseDanmakuInput(req.body, authUser);
+    const message = sendDanmakuMessage({
+      liveRoomId: req.params.liveRoomId,
+      ...input
+    });
+
+    broadcastAuctionEvent(req.params.liveRoomId, "danmaku:new", message);
+    res.json({ ok: true, message });
+  } catch (error) {
+    res.status(400).json({ ok: false, message: getErrorMessage(error) });
   }
 });
 
@@ -473,6 +504,7 @@ app.post("/api/ai/bid-risk", async (req, res) => {
 
 io.on("connection", (socket) => {
   socket.emit("auction:snapshot", getSnapshot());
+  socket.emit("danmaku:history", getDanmakuMessages(DEFAULT_LIVE_ROOM_ID));
 
   socket.on("auction:join", (payload?: { liveRoomId?: string }) => {
     const liveRoomId = payload?.liveRoomId ?? DEFAULT_LIVE_ROOM_ID;
@@ -491,6 +523,7 @@ io.on("connection", (socket) => {
 
     socket.join(getLiveRoomSocketRoom(liveRoomId));
     socket.emit("auction:snapshot", getSnapshot(liveRoomId));
+    socket.emit("danmaku:history", getDanmakuMessages(liveRoomId));
   });
 
   socket.on("auction:bid", (payload, callback) => {
@@ -519,6 +552,29 @@ io.on("connection", (socket) => {
       }
 
       callback?.({ ok: true, bid: result.bid, risk: result.bid.risk });
+    } catch (error) {
+      callback?.({ ok: false, message: getErrorMessage(error) });
+    }
+  });
+
+  socket.on("danmaku:send", (payload, callback) => {
+    try {
+      const schema = z.object({
+        liveRoomId: z.string().min(1),
+        userId: z.string().min(1).optional(),
+        nickname: z.string().min(1).optional(),
+        token: z.string().min(1).optional(),
+        content: z.string().min(1).max(80)
+      });
+      const input = schema.parse(payload);
+      const authUser = input.token ? getUserByToken(input.token) : null;
+      const message = sendDanmakuMessage({
+        liveRoomId: input.liveRoomId,
+        ...parseDanmakuInput(input, authUser)
+      });
+
+      broadcastAuctionEvent(input.liveRoomId, "danmaku:new", message);
+      callback?.({ ok: true, message });
     } catch (error) {
       callback?.({ ok: false, message: getErrorMessage(error) });
     }
@@ -611,6 +667,29 @@ miniprogramWss.on("connection", (ws) => {
           bid: result.bid,
           duplicate: result.duplicate,
           risk: result.bid.risk
+        });
+        return;
+      }
+
+      if (message.type === "danmaku:send") {
+        const schema = z.object({
+          liveRoomId: z.string().min(1),
+          token: z.string().min(1),
+          content: z.string().min(1).max(80)
+        });
+        const payload = schema.parse(message.payload ?? {});
+        const authUser = getUserByToken(payload.token);
+        const danmaku = sendDanmakuMessage({
+          liveRoomId: payload.liveRoomId,
+          userId: authUser.id,
+          nickname: authUser.nickname,
+          content: payload.content
+        });
+
+        broadcastAuctionEvent(payload.liveRoomId, "danmaku:new", danmaku);
+        sendMiniprogramEvent(ws, "danmaku:ack", {
+          ok: true,
+          message: danmaku
         });
         return;
       }
@@ -860,5 +939,35 @@ function resolveBidder(
   return {
     userId: input.userId,
     nickname: input.nickname
+  };
+}
+
+function parseDanmakuInput(
+  input: { userId?: string; nickname?: string; content?: string },
+  authUser: { id: string; nickname: string } | null
+) {
+  const schema = z.object({
+    userId: z.string().min(1).optional(),
+    nickname: z.string().min(1).optional(),
+    content: z.string().min(1, "弹幕内容不能为空").max(80, "弹幕内容不能超过 80 个字符")
+  });
+  const parsed = schema.parse(input);
+
+  if (authUser) {
+    return {
+      userId: authUser.id,
+      nickname: authUser.nickname,
+      content: parsed.content
+    };
+  }
+
+  if (!parsed.userId || !parsed.nickname) {
+    throw new Error("用户 ID 和昵称不能为空");
+  }
+
+  return {
+    userId: parsed.userId,
+    nickname: parsed.nickname,
+    content: parsed.content
   };
 }

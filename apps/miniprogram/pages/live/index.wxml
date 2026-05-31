@@ -17,6 +17,11 @@
     <view class="stage">
       <image wx:if="{{snapshot.product.imageUrl}}" src="{{snapshot.product.imageUrl}}" mode="aspectFill" />
       <view wx:else class="stage-placeholder">模拟直播画面</view>
+      <view class="danmaku-layer">
+        <view wx:for="{{stageDanmakuMessages}}" wx:key="id" class="danmaku-float row-{{index}}">
+          <text>{{item.nickname}}：{{item.content}}</text>
+        </view>
+      </view>
       <view class="stage-overlay">
         <text class="live-badge">{{liveBadgeText}}</text>
         <text class="stage-title">{{room.title}}</text>
@@ -37,6 +42,32 @@
     <view class="card ai-script">
       <text class="eyebrow">AI 好物讲解</text>
       <text>{{aiScriptText}}</text>
+    </view>
+
+    <view class="card danmaku-card">
+      <view class="bid-head">
+        <text class="section-title">弹幕互动</text>
+        <text class="muted">{{danmakuMessages.length}} 条</text>
+      </view>
+      <view class="danmaku-input-row">
+        <input
+          value="{{danmakuText}}"
+          maxlength="80"
+          placeholder="说点什么"
+          bindinput="onDanmakuInput"
+        />
+        <button class="primary danmaku-button" disabled="{{sendingDanmaku || !danmakuText}}" bindtap="submitDanmaku">
+          {{sendingDanmaku ? "发送中" : "发送"}}
+        </button>
+      </view>
+      <view wx:if="{{danmakuMessages.length === 0}}" class="muted">暂无弹幕</view>
+      <view wx:for="{{danmakuMessages}}" wx:key="id" class="danmaku-row">
+        <view>
+          <text>{{item.nickname}}</text>
+          <text class="muted time">{{item.createdAtText}}</text>
+        </view>
+        <text class="danmaku-content">{{item.content}}</text>
+      </view>
     </view>
 
     <view class="stats">

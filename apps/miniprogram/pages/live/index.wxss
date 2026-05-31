@@ -50,6 +50,59 @@
   font-weight: 900;
 }
 
+.danmaku-layer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 76rpx;
+  bottom: 132rpx;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.danmaku-float {
+  position: absolute;
+  left: 36rpx;
+  right: 36rpx;
+  min-height: 46rpx;
+  padding: 0 18rpx;
+  border-radius: 999rpx;
+  background: rgba(0, 0, 0, 0.42);
+  color: #ffffff;
+  font-size: 24rpx;
+  font-weight: 800;
+  line-height: 46rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.danmaku-float text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-0 {
+  top: 0;
+}
+
+.row-1 {
+  top: 54rpx;
+}
+
+.row-2 {
+  top: 108rpx;
+}
+
+.row-3 {
+  top: 162rpx;
+}
+
+.row-4 {
+  top: 216rpx;
+}
+
 .stage-overlay {
   position: absolute;
   left: 24rpx;
@@ -101,6 +154,56 @@
   gap: 10rpx;
   border-left: 6rpx solid #d82f44;
   line-height: 1.65;
+}
+
+.danmaku-card {
+  display: grid;
+  gap: 14rpx;
+}
+
+.danmaku-input-row {
+  display: grid;
+  grid-template-columns: 1fr 150rpx;
+  gap: 12rpx;
+  align-items: center;
+}
+
+.danmaku-input-row input {
+  margin-bottom: 0;
+}
+
+.danmaku-button {
+  min-height: 88rpx;
+  margin: 0;
+  padding: 0 12rpx;
+  line-height: 88rpx;
+}
+
+.danmaku-row {
+  display: grid;
+  grid-template-columns: 180rpx 1fr;
+  gap: 18rpx;
+  padding: 16rpx 0;
+  border-top: 1rpx solid #eef2f5;
+}
+
+.danmaku-row view {
+  min-width: 0;
+}
+
+.danmaku-row view text:first-child {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 800;
+}
+
+.danmaku-content {
+  color: #17212b;
+  font-size: 26rpx;
+  line-height: 1.45;
+  word-break: break-all;
 }
 
 .product-name {
