@@ -3,6 +3,7 @@ const {
   getAuctionSnapshot,
   getDanmakuMessages,
   getLiveRoom,
+  getMiniprogramWsUrl,
   getMyOrders,
   payOrder,
   placeBid,
@@ -123,6 +124,7 @@ Page({
         clearInterval(this.clockTimer);
         clearInterval(this.pollingTimer);
         this.load();
+        this.connectRealtime();
         this.clockTimer = setInterval(() => this.refreshComputed(), 500);
         this.pollingTimer = setInterval(() => this.loadSnapshot(), POLLING_INTERVAL_MS);
       })
@@ -308,6 +310,135 @@ Page({
 
   closeRealtime() {
     this.snapshotLoading = false;
+    this.realtimeConnected = false;
+
+    if (this.realtimeSocket) {
+      this.realtimeSocket.close();
+      this.realtimeSocket = null;
+    }
+  },
+
+  connectRealtime() {
+    if (!wx.connectSocket) {
+      this.usePollingRealtime();
+      return;
+    }
+
+    this.closeRealtime();
+    this.setData({ realtimeText: `正在连接实时通道：${getApiBaseUrl()}` });
+
+    const socket = wx.connectSocket({
+      url: getMiniprogramWsUrl()
+    });
+    this.realtimeSocket = socket;
+
+    socket.onOpen(() => {
+      if (this.realtimeSocket !== socket) {
+        return;
+      }
+
+      this.realtimeConnected = true;
+      this.setData({
+        realtimeText: `WebSocket 实时同步中：${getApiBaseUrl()}`,
+        debugText: `实时通道已连接 ${time(Date.now())}`
+      });
+      this.sendRealtimeMessage("auction:join", { liveRoomId: this.data.liveRoomId });
+    });
+
+    socket.onMessage((event) => {
+      if (this.realtimeSocket !== socket) {
+        return;
+      }
+
+      this.handleRealtimeMessage(event.data);
+    });
+
+    socket.onError((error) => {
+      if (this.realtimeSocket !== socket) {
+        return;
+      }
+
+      this.realtimeConnected = false;
+      this.setData({
+        realtimeText: `实时通道异常，轮询同步中：${getApiBaseUrl()}`,
+        debugText: error.errMsg || "WebSocket 连接异常"
+      });
+    });
+
+    socket.onClose(() => {
+      if (this.realtimeSocket !== socket) {
+        return;
+      }
+
+      this.realtimeConnected = false;
+      this.realtimeSocket = null;
+      this.setData({
+        realtimeText: `实时通道已断开，轮询同步中：${getApiBaseUrl()}`
+      });
+    });
+  },
+
+  sendRealtimeMessage(type, payload) {
+    if (!this.realtimeSocket || !this.realtimeConnected) {
+      return;
+    }
+
+    this.realtimeSocket.send({
+      data: JSON.stringify({ type, payload })
+    });
+  },
+
+  handleRealtimeMessage(raw) {
+    let event;
+
+    try {
+      event = JSON.parse(raw);
+    } catch {
+      return;
+    }
+
+    const payload = event.payload;
+
+    if (
+      event.type === "auction:snapshot" ||
+      event.type === "auction:started" ||
+      event.type === "auction:bid-success" ||
+      event.type === "auction:extended" ||
+      event.type === "auction:ended" ||
+      event.type === "order:paid"
+    ) {
+      this.applySnapshot(payload);
+      this.setData({ debugText: `实时同步 ${time(Date.now())}` });
+      return;
+    }
+
+    if (event.type === "danmaku:history" && Array.isArray(payload)) {
+      const messages = this.formatDanmakuMessages(payload);
+      this.setData({
+        danmakuMessages: messages,
+        stageDanmakuMessages: messages.slice(0, 5)
+      });
+      return;
+    }
+
+    if (event.type === "danmaku:new") {
+      this.applyDanmakuMessage(payload);
+      return;
+    }
+
+    if (event.type === "danmaku:retracted") {
+      this.removeDanmakuMessage(payload && payload.id);
+      return;
+    }
+
+    if (event.type === "danmaku:user-blocked") {
+      this.removeDanmakuUser(payload && payload.userId);
+      return;
+    }
+
+    if (event.type === "auction:error") {
+      this.showHint(payload?.message || "实时同步异常");
+    }
   },
 
   applySnapshot(snapshot) {

@@ -28,6 +28,10 @@ function getApiBaseUrlCandidates() {
   return candidates.filter((candidate, index) => candidates.indexOf(candidate) === index);
 }
 
+function getMiniprogramWsUrl() {
+  return `${getApiBaseUrl().replace(/^http/, "ws")}/miniprogram-ws`;
+}
+
 function setApiBaseUrl(apiBaseUrl) {
   const normalized = normalizeBaseUrl(apiBaseUrl || DEFAULT_API_BASE_URL);
   const appConfig = getAppConfig();
@@ -225,6 +229,7 @@ module.exports = {
   getMe,
   getLiveRoom,
   getLiveRooms,
+  getMiniprogramWsUrl,
   getMyOrders,
   loginBuyer,
   payOrder,
