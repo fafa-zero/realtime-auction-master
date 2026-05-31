@@ -127,6 +127,19 @@ export interface ProductImportRow {
   scriptKeywords?: string;
 }
 
+export interface CreateLiveRoomInput {
+  ownerUserId: string;
+  title: string;
+  hostName?: string;
+  productName: string;
+  productDescription: string;
+  startPrice: number;
+  incrementStep: number;
+  ceilingPrice: number;
+  durationSeconds: number;
+  stock?: number;
+}
+
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const RISK_RECENT_WINDOW_MS = 20_000;
 const RISK_PENDING_ORDER_LIMIT = 2;
@@ -145,6 +158,10 @@ export function getLiveRooms() {
 
 export function getLiveRoom(liveRoomId = DEFAULT_LIVE_ROOM_ID) {
   return enrichLiveRoom(requireLiveRoom(liveRoomId));
+}
+
+export function getLiveRoomsForHost(userId: string) {
+  return getLiveRooms().filter((room) => room.ownerUserId === userId);
 }
 
 export function getAuction(liveRoomId = DEFAULT_LIVE_ROOM_ID) {
@@ -194,6 +211,65 @@ export function getOrders(liveRoomId?: string) {
 
 export function getOrdersForUser(userId: string, liveRoomId?: string) {
   return getOrders(liveRoomId).filter((order) => order.buyerUserId === userId);
+}
+
+export function createLiveRoom(input: CreateLiveRoomInput) {
+  const normalized = normalizeProductImportRow({
+    name: input.productName,
+    description: input.productDescription,
+    startPrice: input.startPrice,
+    incrementStep: input.incrementStep,
+    ceilingPrice: input.ceilingPrice,
+    durationSeconds: input.durationSeconds,
+    stock: input.stock ?? 1
+  });
+  const roomId = `live-${randomUUID()}`;
+  const productId = `product-${randomUUID()}`;
+  const auctionId = `auction-${randomUUID()}`;
+  const owner = users.find((user) => user.id === input.ownerUserId);
+  const liveRoom: LiveRoom = {
+    id: roomId,
+    title: input.title.trim() || `${normalized.name}直播间`,
+    hostName: input.hostName?.trim() || owner?.nickname || "新主播",
+    streamUrl: `https://example.com/mock/${roomId}.m3u8`,
+    viewerCount: 0,
+    currentAuctionId: auctionId,
+    ownerUserId: input.ownerUserId,
+    createdAt: Date.now()
+  };
+  const product: Product = {
+    id: productId,
+    liveRoomId: roomId,
+    name: normalized.name,
+    imageUrl: "",
+    description: normalized.description,
+    startPrice: normalized.startPrice,
+    incrementStep: normalized.incrementStep,
+    ceilingPrice: normalized.ceilingPrice,
+    durationSeconds: normalized.durationSeconds,
+    stock: normalized.stock,
+    queueStatus: "QUEUED",
+    importedAt: Date.now()
+  };
+  const auction = createSeedAuction({
+    id: auctionId,
+    liveRoomId: roomId,
+    productId,
+    startPrice: normalized.startPrice,
+    incrementStep: normalized.incrementStep,
+    ceilingPrice: normalized.ceilingPrice,
+    durationSeconds: normalized.durationSeconds
+  });
+
+  liveRooms.push(liveRoom);
+  products.push(product);
+  auctions.push(auction);
+  saveState();
+
+  return {
+    room: enrichLiveRoom(liveRoom),
+    snapshot: getSnapshot(roomId)
+  };
 }
 
 export function getDanmakuMessages(liveRoomId = DEFAULT_LIVE_ROOM_ID) {

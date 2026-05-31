@@ -27,6 +27,8 @@ export interface LiveRoom {
   streamUrl: string;
   viewerCount: number;
   currentAuctionId: string;
+  ownerUserId?: string;
+  createdAt?: number;
 }
 
 export interface Bid {

@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
+  ArrowLeft,
   BadgeCheck,
   BarChart3,
   Bot,
   CircleDollarSign,
   Clock3,
   CreditCard,
-  Flame,
   FileText,
   History,
   LogOut,
+  PlusCircle,
   Package,
   PlayCircle,
   Radio,
@@ -80,6 +81,18 @@ type RegisterInput = {
   role: "HOST" | "BUYER";
 };
 
+type CreateRoomInput = {
+  title: string;
+  hostName: string;
+  productName: string;
+  productDescription: string;
+  startPrice: string;
+  incrementStep: string;
+  ceilingPrice: string;
+  durationSeconds: string;
+  stock: string;
+};
+
 type ImportResult = {
   importedCount: number;
   failedRows: Array<{ rowNumber: number; reason: string }>;
@@ -99,6 +112,7 @@ type AppRoute = {
   viewMode: ViewMode;
   liveRoomId: string;
   home?: boolean;
+  setup?: boolean;
   notFound?: boolean;
 };
 
@@ -107,12 +121,6 @@ const aiTaskText: Record<AiTask, string> = {
   summary: "竞拍复盘",
   risk: "风险提示"
 };
-
-const demoBidders = [
-  { userId: "demo-user-a", nickname: "演示用户A", stepMultiplier: 1 },
-  { userId: "demo-user-b", nickname: "演示用户B", stepMultiplier: 2 },
-  { userId: "demo-user-c", nickname: "演示用户C", stepMultiplier: 3 }
-];
 
 function resolveApiUrl(configuredApiUrl?: string) {
   const value = configuredApiUrl?.trim();
@@ -230,7 +238,53 @@ export function App() {
   }, [currentUser?.nickname]);
 
   useEffect(() => {
-    if (route.notFound || route.home || !session) {
+    if (
+      route.notFound ||
+      route.home ||
+      route.setup ||
+      !session ||
+      viewMode !== "host" ||
+      liveRoomId !== DEFAULT_LIVE_ROOM_ID ||
+      session.user.account === "demo-host"
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function routeHostToOwnedRoom() {
+      try {
+        const roomId = await resolveHostEntryRoom(session as WebSession);
+
+        if (cancelled) {
+          return;
+        }
+
+        navigateTo(roomId ? `/host?liveRoomId=${encodeURIComponent(roomId)}` : "/host/setup", setRoute);
+      } catch {
+        if (!cancelled) {
+          navigateTo("/host/setup", setRoute);
+        }
+      }
+    }
+
+    void routeHostToOwnedRoom();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    liveRoomId,
+    route.home,
+    route.notFound,
+    route.setup,
+    session,
+    session?.user.account,
+    viewMode
+  ]);
+
+  useEffect(() => {
+    if (route.notFound || route.home || route.setup || !session) {
       return;
     }
 
@@ -480,6 +534,8 @@ export function App() {
       ["SOLD", "UNSOLD", "CANCELLED"].includes(snapshot.auction.status) &&
       nextQueueItem
   );
+  const currentRoomDanmakuMessages = danmakuMessages.filter((item) => isVisibleDanmaku(item, liveRoomId));
+  const visibleFlyingDanmaku = currentRoomDanmakuMessages.filter((item) => now - item.createdAt <= 8_000);
 
   async function handleDemoLogin(role: "HOST" | "BUYER") {
     setAuthMessage("正在登录演示账号...");
@@ -491,7 +547,8 @@ export function App() {
       setMessage(`已登录：${session.user.nickname}`);
 
       if (role === "HOST") {
-        navigateTo(`/host?liveRoomId=${encodeURIComponent(liveRoomId)}`, setRoute);
+        const roomId = await resolveHostEntryRoom(session);
+        navigateTo(roomId ? `/host?liveRoomId=${encodeURIComponent(roomId)}` : "/host/setup", setRoute);
       } else {
         navigateTo(`/live/${liveRoomId}`, setRoute);
       }
@@ -525,7 +582,8 @@ export function App() {
       if (session.user.role === "BUYER") {
         navigateTo(`/live/${liveRoomId}`, setRoute);
       } else {
-        navigateTo(`/host?liveRoomId=${encodeURIComponent(liveRoomId)}`, setRoute);
+        const roomId = await resolveHostEntryRoom(session);
+        navigateTo(roomId ? `/host?liveRoomId=${encodeURIComponent(roomId)}` : "/host/setup", setRoute);
       }
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : "登录失败");
@@ -537,6 +595,64 @@ export function App() {
     writeStoredSession(null);
     setAuthMessage("");
     navigateTo("/", setRoute);
+  }
+
+  async function createHostRoom(input: CreateRoomInput) {
+    if (!session) {
+      setMessage("请先登录主播账号");
+      return;
+    }
+
+    const payload = {
+      title: input.title.trim(),
+      hostName: input.hostName.trim() || currentUser?.nickname || "新主播",
+      productName: input.productName.trim(),
+      productDescription: input.productDescription.trim(),
+      startPrice: Number(input.startPrice),
+      incrementStep: Number(input.incrementStep),
+      ceilingPrice: Number(input.ceilingPrice),
+      durationSeconds: Number(input.durationSeconds),
+      stock: Number(input.stock || 1)
+    };
+    const res = await fetch(`${API_URL}/api/live-rooms`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeaders(session)
+      },
+      body: JSON.stringify(payload)
+    });
+    const data = await readJson<{ room?: LiveRoom; snapshot?: AuctionSnapshot; message?: string }>(res);
+
+    if (!res.ok || !data.room) {
+      setMessage(data.message ?? "创建直播间失败");
+      throw new Error(data.message ?? "创建直播间失败");
+    }
+
+    setLiveRooms((current) => [data.room as LiveRoom, ...current.filter((room) => room.id !== data.room?.id)]);
+    setMessage(`直播间已创建：${data.room.title}`);
+    navigateTo(`/host?liveRoomId=${encodeURIComponent(data.room.id)}`, setRoute);
+  }
+
+  function goBack() {
+    setSession(null);
+    writeStoredSession(null);
+    setAuthMode("login");
+    setAuthMessage("已返回登录入口，可重新登录或注册账号");
+    setMessage("已返回登录入口");
+  }
+
+  function renderFloatingBackButton() {
+    if (route.home) {
+      return null;
+    }
+
+    return (
+      <button className="floating-back-button" onClick={goBack}>
+        <ArrowLeft size={18} />
+        返回登录/注册
+      </button>
+    );
   }
 
   async function startAuction() {
@@ -631,35 +747,6 @@ export function App() {
     });
   }
 
-  function placeDemoBid(bidder: (typeof demoBidders)[number]) {
-    if (!snapshot) {
-      return;
-    }
-
-    const price = Math.min(
-      snapshot.auction.ceilingPrice,
-      snapshot.auction.currentPrice + snapshot.auction.incrementStep * bidder.stepMultiplier
-    );
-
-    emitBid({
-      userId: bidder.userId,
-      nickname: bidder.nickname,
-      price
-    });
-  }
-
-  function placeCeilingBid() {
-    if (!snapshot) {
-      return;
-    }
-
-    emitBid({
-      userId: "demo-user-final",
-      nickname: "封顶买家",
-      price: snapshot.auction.ceilingPrice
-    });
-  }
-
   function emitBid(input: {
     userId: string;
     nickname: string;
@@ -720,12 +807,18 @@ export function App() {
     }
 
     setSendingDanmaku(true);
+    const danmakuSender = getDanmakuSender({
+      currentUser,
+      fallbackUserId: userId,
+      fallbackNickname: nickname,
+      viewMode
+    });
     socketRef.current.emit(
       "danmaku:send",
       {
         liveRoomId,
-        userId,
-        nickname,
+        userId: danmakuSender.userId,
+        nickname: danmakuSender.nickname,
         token: session?.token,
         content
       },
@@ -1048,6 +1141,7 @@ export function App() {
   if (!authChecked) {
     return (
       <main className="loading-page">
+        {renderFloatingBackButton()}
         <UserCheck className="spin" size={28} />
         <p>正在校验登录状态...</p>
       </main>
@@ -1056,35 +1150,60 @@ export function App() {
 
   if (!session && !route.notFound) {
     return (
-      <LoginRoute
-        message={
-          authMessage ||
-          (viewMode === "buyer" ? "买家预览需要先登录或注册买家账号" : "商家控制台需要先登录或注册账号")
-        }
-        mode={authMode}
-        preferredRole={viewMode === "buyer" ? "BUYER" : "HOST"}
-        onModeChange={setAuthMode}
-        onDemoLogin={handleDemoLogin}
-        onLogin={handleManualLogin}
-        onRegister={handleRegister}
-      />
+      <>
+        {renderFloatingBackButton()}
+        <LoginRoute
+          message={
+            authMessage ||
+            (viewMode === "buyer" ? "买家预览需要先登录或注册买家账号" : "商家控制台需要先登录或注册账号")
+          }
+          mode={authMode}
+          preferredRole={viewMode === "buyer" ? "BUYER" : "HOST"}
+          onModeChange={setAuthMode}
+          onDemoLogin={handleDemoLogin}
+          onLogin={handleManualLogin}
+          onRegister={handleRegister}
+        />
+      </>
+    );
+  }
+
+  if (route.setup) {
+    if (currentUser?.role === "BUYER") {
+      navigateTo(`/live/${liveRoomId}`, setRoute);
+      return null;
+    }
+
+    return (
+      <>
+        {renderFloatingBackButton()}
+        <HostSetupRoute
+          hostName={currentUser?.nickname ?? ""}
+          message={message}
+          onCreate={createHostRoom}
+        />
+      </>
     );
   }
 
   if (route.notFound || loadError) {
     return (
-      <RouteError
-        title={route.notFound ? "页面不存在" : "无法进入直播间"}
-        message={loadError ?? "请检查访问路径，主播端使用 /host，观众预览页使用 /live/live-1。"}
-        onGoHost={() => navigateTo("/host", setRoute)}
-        onGoLive={() => navigateTo(`/live/${DEFAULT_LIVE_ROOM_ID}`, setRoute)}
-      />
+      <>
+        {renderFloatingBackButton()}
+        <RouteError
+          title={route.notFound ? "页面不存在" : "无法进入直播间"}
+          message={loadError ?? "请检查访问路径，主播端使用 /host，观众预览页使用 /live/live-1。"}
+          onGoHost={() => navigateTo("/host", setRoute)}
+          onGoLive={() => navigateTo(`/live/${DEFAULT_LIVE_ROOM_ID}`, setRoute)}
+        />
+      </>
     );
   }
 
   if (!snapshot) {
     return (
       <main className="loading-page">
+        {renderFloatingBackButton()}
         <Radio className="spin" size={28} />
         <p>{message}</p>
       </main>
@@ -1093,15 +1212,18 @@ export function App() {
 
   return (
     <main className="app-shell">
+      {renderFloatingBackButton()}
       <section className="live-panel">
         <div className="topbar">
-          <div>
+          <div className="topbar-title">
+            <div>
               <p className="eyebrow">实时竞拍大师</p>
               <h1>{viewMode === "host" ? "直播间竞拍控制台" : "观众实时竞拍台"}</h1>
               <p className="topbar-meta">
                 {syncLabel} / {currentUser ? currentUser.nickname : "未登录访客"} / Socket.IO 多端广播
               </p>
             </div>
+          </div>
           <div className="topbar-actions">
             {viewMode === "host" ? (
               <label className="room-select">
@@ -1153,7 +1275,7 @@ export function App() {
           </div>
           <img src={snapshot.product.imageUrl} alt={snapshot.product.name} />
           <div className="danmaku-overlay" aria-live="polite">
-            {danmakuMessages.slice(0, 10).map((item, index) => (
+            {visibleFlyingDanmaku.slice(0, 10).map((item, index) => (
               <div
                 className="danmaku-fly"
                 key={item.id}
@@ -1204,10 +1326,10 @@ export function App() {
               <div>
                 <strong>最近弹幕</strong>
                 <div className="danmaku-review-list">
-                  {danmakuMessages.length === 0 ? (
+                  {currentRoomDanmakuMessages.length === 0 ? (
                     <p className="muted">暂无弹幕</p>
                   ) : (
-                    danmakuMessages.slice(0, 6).map((item) => (
+                    currentRoomDanmakuMessages.slice(0, 6).map((item) => (
                       <div className="danmaku-review-row" key={item.id}>
                         <div>
                           <span>{item.nickname}</span>
@@ -1349,34 +1471,36 @@ export function App() {
           </section>
         ) : null}
 
-        <section className="panel-section">
-          <div className="section-title">
-            <CircleDollarSign size={18} />
-            <h2>{viewMode === "host" ? "用户出价" : "我要出价"}</h2>
-          </div>
-          <label className="field">
-            <span>昵称</span>
-            <input value={nickname} onChange={(event) => setNickname(event.target.value)} />
-          </label>
-          <label className="field">
-            <span>出价金额</span>
-            <input
-              type="number"
-              min={nextBid}
-              step={snapshot.auction.incrementStep}
-              value={bidPrice}
-              onChange={(event) => setBidPrice(event.target.value)}
-            />
-          </label>
-          <p className={canBid ? "bid-helper ok" : "bid-helper"}>{bidFeedback}</p>
-          <button
-            className="primary-button"
-            disabled={!canBid}
-            onClick={placeUserBid}
-          >
-            {submittingBid ? "出价提交中" : `出价 ${formatMoney(Number(bidPrice || nextBid))}`}
-          </button>
-        </section>
+        {viewMode === "buyer" ? (
+          <section className="panel-section">
+            <div className="section-title">
+              <CircleDollarSign size={18} />
+              <h2>我要出价</h2>
+            </div>
+            <label className="field">
+              <span>昵称</span>
+              <input value={nickname} onChange={(event) => setNickname(event.target.value)} />
+            </label>
+            <label className="field">
+              <span>出价金额</span>
+              <input
+                type="number"
+                min={nextBid}
+                step={snapshot.auction.incrementStep}
+                value={bidPrice}
+                onChange={(event) => setBidPrice(event.target.value)}
+              />
+            </label>
+            <p className={canBid ? "bid-helper ok" : "bid-helper"}>{bidFeedback}</p>
+            <button
+              className="primary-button"
+              disabled={!canBid}
+              onClick={placeUserBid}
+            >
+              {submittingBid ? "出价提交中" : `出价 ${formatMoney(Number(bidPrice || nextBid))}`}
+            </button>
+          </section>
+        ) : null}
 
         {viewMode === "host" ? (
           <>
@@ -1501,34 +1625,6 @@ export function App() {
                   ))}
                 </div>
               )}
-            </section>
-
-            <section className="panel-section demo-panel">
-              <div className="section-title">
-                <Flame size={18} />
-                <h2>演示出价工具</h2>
-              </div>
-              <div className="demo-bid-grid">
-                {demoBidders.map((bidder) => (
-                  <button
-                    disabled={snapshot.auction.status !== "ACTIVE" || !connected}
-                    key={bidder.userId}
-                    onClick={() => placeDemoBid(bidder)}
-                  >
-                    <span>{bidder.nickname}</span>
-                    <strong>
-                      +{formatMoney(snapshot.auction.incrementStep * bidder.stepMultiplier)}
-                    </strong>
-                  </button>
-                ))}
-              </div>
-              <button
-                className="ceiling-button"
-                disabled={snapshot.auction.status !== "ACTIVE" || !connected}
-                onClick={placeCeilingBid}
-              >
-                封顶出价 {formatMoney(snapshot.auction.ceilingPrice)}
-              </button>
             </section>
 
             <section className="panel-section">
@@ -1914,6 +2010,109 @@ function LoginRoute(props: {
   );
 }
 
+function HostSetupRoute(props: {
+  hostName: string;
+  message: string;
+  onCreate: (input: CreateRoomInput) => Promise<void>;
+}) {
+  const [title, setTitle] = useState("");
+  const [hostName, setHostName] = useState(props.hostName);
+  const [productName, setProductName] = useState("");
+  const [productDescription, setProductDescription] = useState("");
+  const [startPrice, setStartPrice] = useState("0");
+  const [incrementStep, setIncrementStep] = useState("100");
+  const [ceilingPrice, setCeilingPrice] = useState("3000");
+  const [durationSeconds, setDurationSeconds] = useState("90");
+  const [stock, setStock] = useState("1");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setHostName(props.hostName);
+  }, [props.hostName]);
+
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    setError("");
+    setSubmitting(true);
+
+    try {
+      await props.onCreate({
+        title,
+        hostName,
+        productName,
+        productDescription,
+        startPrice,
+        incrementStep,
+        ceilingPrice,
+        durationSeconds,
+        stock
+      });
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "创建直播间失败");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <main className="route-error setup-route">
+      <div>
+        <PlusCircle size={28} />
+        <p className="eyebrow">主播开播设置</p>
+        <h1>创建直播间</h1>
+        <p>{error || props.message || "填写直播间和首件商品信息后进入主播控制台。"}</p>
+        <form className="auth-form setup-form" onSubmit={handleSubmit}>
+          <label className="field">
+            <span>直播间名称</span>
+            <input value={title} maxLength={80} placeholder="例如：春季好物专场" onChange={(event) => setTitle(event.target.value)} />
+          </label>
+          <label className="field">
+            <span>主播名称</span>
+            <input value={hostName} maxLength={40} placeholder="主播或店铺名称" onChange={(event) => setHostName(event.target.value)} />
+          </label>
+          <label className="field">
+            <span>要卖什么</span>
+            <input value={productName} maxLength={80} placeholder="商品名称" onChange={(event) => setProductName(event.target.value)} />
+          </label>
+          <label className="field">
+            <span>商品描述</span>
+            <input value={productDescription} maxLength={300} placeholder="材质、成色、亮点、适用场景" onChange={(event) => setProductDescription(event.target.value)} />
+          </label>
+          <div className="settings-grid">
+            <label className="field">
+              <span>起拍价</span>
+              <input type="number" min={0} value={startPrice} onChange={(event) => setStartPrice(event.target.value)} />
+            </label>
+            <label className="field">
+              <span>最低加价</span>
+              <input type="number" min={1} value={incrementStep} onChange={(event) => setIncrementStep(event.target.value)} />
+            </label>
+            <label className="field">
+              <span>封顶价</span>
+              <input type="number" min={1} value={ceilingPrice} onChange={(event) => setCeilingPrice(event.target.value)} />
+            </label>
+          </div>
+          <div className="settings-grid">
+            <label className="field">
+              <span>竞拍时长秒</span>
+              <input type="number" min={15} max={600} value={durationSeconds} onChange={(event) => setDurationSeconds(event.target.value)} />
+            </label>
+            <label className="field">
+              <span>库存</span>
+              <input type="number" min={1} value={stock} onChange={(event) => setStock(event.target.value)} />
+            </label>
+          </div>
+          <button className="primary-button" disabled={submitting}>
+            <PlusCircle size={16} />
+            {submitting ? "创建中" : "创建并进入直播间"}
+          </button>
+        </form>
+      </div>
+    </main>
+  );
+}
+
 function HomeRoute(props: {
   liveRoomId: string;
   session: WebSession | null;
@@ -1974,6 +2173,14 @@ function parseRoute(pathname: string): AppRoute {
       viewMode: "buyer",
       liveRoomId: DEFAULT_LIVE_ROOM_ID,
       home: true
+    };
+  }
+
+  if (cleanPath === "/host/setup") {
+    return {
+      viewMode: "host",
+      liveRoomId: DEFAULT_LIVE_ROOM_ID,
+      setup: true
     };
   }
 
@@ -2046,6 +2253,19 @@ async function registerWeb(input: RegisterInput): Promise<{ user: AuthUser }> {
   return { user: data.user };
 }
 
+async function resolveHostEntryRoom(session: WebSession) {
+  const res = await fetch(`${API_URL}/api/me/live-rooms`, {
+    headers: getAuthHeaders(session)
+  });
+  const data = await readJson<{ items?: LiveRoom[]; message?: string }>(res);
+
+  if (!res.ok) {
+    throw new Error(data.message ?? "无法获取主播直播间");
+  }
+
+  return data.items?.[0]?.id ?? null;
+}
+
 async function readJson<T>(res: Response): Promise<T> {
   const contentType = res.headers.get("content-type") ?? "";
 
@@ -2100,6 +2320,25 @@ function Metric(props: { label: string; value: string }) {
 
 function isVisibleDanmaku(item: DanmakuMessage, liveRoomId: string) {
   return item.liveRoomId === liveRoomId && (item.status ?? "VISIBLE") === "VISIBLE";
+}
+
+function getDanmakuSender(input: {
+  currentUser: AuthUser | null;
+  fallbackUserId: string;
+  fallbackNickname: string;
+  viewMode: ViewMode;
+}) {
+  if (input.currentUser) {
+    return {
+      userId: input.currentUser.id,
+      nickname: input.currentUser.nickname
+    };
+  }
+
+  return {
+    userId: input.viewMode === "buyer" ? input.fallbackUserId : "guest-host",
+    nickname: input.viewMode === "buyer" ? input.fallbackNickname.trim() || "Web 预览买家" : "演示主播"
+  };
 }
 
 function getQueueStats(items: ProductQueueItem[], orders: Order[]) {

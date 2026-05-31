@@ -8,6 +8,7 @@ import { z } from "zod";
 import {
   cancelAuction,
   blockDanmakuUser,
+  createLiveRoom,
   detectBidRisk,
   getAuctionHistory,
   generateAuctionSummary,
@@ -18,6 +19,7 @@ import {
   getDanmakuMessages,
   getLiveRoom,
   getLiveRooms,
+  getLiveRoomsForHost,
   getOrder,
   getOrders,
   getOrdersForUser,
@@ -86,7 +88,7 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true, serverTime: Date.now() });
 });
 
-app.get(["/", "/host", "/live/:liveRoomId"], (_req, res) => {
+app.get(["/", "/host", "/host/setup", "/live/:liveRoomId"], (_req, res) => {
   res.sendFile(path.join(WEB_DIST_DIR, "index.html"));
 });
 
@@ -204,6 +206,43 @@ app.get("/api/live-rooms", (_req, res) => {
     ok: true,
     items: getLiveRooms()
   });
+});
+
+app.get("/api/me/live-rooms", (req, res) => {
+  try {
+    const user = requireHostUser(req);
+    res.json({
+      ok: true,
+      items: getLiveRoomsForHost(user.id)
+    });
+  } catch (error) {
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
+app.post("/api/live-rooms", (req, res) => {
+  try {
+    const user = requireHostUser(req);
+    const schema = z.object({
+      title: z.string().min(1, "直播间名称不能为空").max(80),
+      hostName: z.string().max(40).optional(),
+      productName: z.string().min(1, "商品名称不能为空").max(80),
+      productDescription: z.string().min(1, "商品描述不能为空").max(300),
+      startPrice: z.number().int().min(0),
+      incrementStep: z.number().int().min(1),
+      ceilingPrice: z.number().int().min(1),
+      durationSeconds: z.number().int().min(15).max(600),
+      stock: z.number().int().min(1).max(100_000).optional()
+    });
+    const input = schema.parse(req.body ?? {});
+    const result = createLiveRoom({
+      ownerUserId: user.id,
+      ...input
+    });
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
+  }
 });
 
 app.get("/api/live-rooms/default", (_req, res) => {

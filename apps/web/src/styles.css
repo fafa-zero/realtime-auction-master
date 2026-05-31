@@ -214,6 +214,35 @@ button:disabled {
   margin-bottom: 18px;
 }
 
+.topbar-title {
+  min-width: 0;
+}
+
+.floating-back-button {
+  position: fixed;
+  z-index: 30;
+  top: 18px;
+  left: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 16px;
+  border-color: #f0b8c0;
+  color: #fff;
+  background: var(--accent);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 0.18);
+  font-size: 15px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.floating-back-button:hover:not(:disabled) {
+  border-color: var(--accent-dark);
+  background: var(--accent-dark);
+}
+
 .topbar-actions {
   display: flex;
   flex-wrap: wrap;
@@ -383,7 +412,7 @@ h2 {
   line-height: 1.35;
   text-shadow: 0 1px 2px rgb(0 0 0 / 0.5);
   white-space: nowrap;
-  animation: danmaku-scroll 11s linear infinite;
+  animation: danmaku-scroll 8s linear both;
 }
 
 .danmaku-fly span {
@@ -871,52 +900,6 @@ h2 {
 .primary-button:hover:not(:disabled) {
   border-color: var(--accent-dark);
   background: var(--accent-dark);
-}
-
-.demo-panel {
-  background: #fffdf8;
-}
-
-.demo-bid-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.demo-bid-grid button {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  min-height: 58px;
-  padding: 8px;
-  text-align: left;
-}
-
-.demo-bid-grid button span,
-.demo-bid-grid button strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.demo-bid-grid button span {
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.demo-bid-grid button strong {
-  color: var(--accent);
-  font-size: 12px;
-}
-
-.ceiling-button {
-  width: 100%;
-  margin-top: 10px;
-  border-color: #f0b8c0;
-  color: var(--accent-dark);
-  background: #fff1f3;
-  font-weight: 800;
 }
 
 .button-row {
@@ -1408,6 +1391,14 @@ h2 {
     flex-direction: column;
   }
 
+  .floating-back-button {
+    top: 12px;
+    left: 12px;
+    min-height: 40px;
+    padding: 0 12px;
+    font-size: 14px;
+  }
+
   .topbar-actions {
     justify-content: stretch;
     width: 100%;
@@ -1465,7 +1456,6 @@ h2 {
   .queue-summary,
   .button-row,
   .ai-actions,
-  .demo-bid-grid,
   .queue-focus {
     grid-template-columns: 1fr;
   }
