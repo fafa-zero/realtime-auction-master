@@ -1903,6 +1903,7 @@ function LoginRoute(props: {
   const [nickname, setNickname] = useState("");
   const [role, setRole] = useState<"HOST" | "BUYER">(props.preferredRole);
   const isRegister = props.mode === "register";
+  const nicknamePlaceholder = role === "BUYER" ? "买家昵称" : "主播或店铺名称";
 
   useEffect(() => {
     setRole(props.preferredRole);
@@ -1966,7 +1967,7 @@ function LoginRoute(props: {
               <input
                 value={nickname}
                 maxLength={40}
-                placeholder="商家或主播名称"
+                placeholder={nicknamePlaceholder}
                 onChange={(event) => setNickname(event.target.value)}
               />
             </label>
