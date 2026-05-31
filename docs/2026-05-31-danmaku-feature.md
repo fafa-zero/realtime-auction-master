@@ -172,6 +172,7 @@ npm run build
 - Socket.IO 客户端发送 `danmaku:send` 后，另一个同直播间客户端可收到 `danmaku:new`。
 - `GET /host/setup` 和 `GET /live/live-1` 均可通过 4300 服务返回前端页面。
 - Web 端最新生产包已生成并由 `http://localhost:4300` 服务托管。
+- 小程序观看模式已按共用买家账号完成端到端冒烟：注册 / 登录 Web 买家账号、进入直播间、提交竞拍出价、发送弹幕、读取同直播间弹幕历史均通过。
 
 ## Git 提交说明
 
