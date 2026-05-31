@@ -252,10 +252,49 @@ Page({
   },
 
   formatDanmakuMessages(items) {
-    return items.slice(0, 20).map((item) => ({
+    return items
+      .filter((item) => (item.status || "VISIBLE") === "VISIBLE")
+      .slice(0, 20)
+      .map((item) => ({
+        ...item,
+        createdAtText: time(item.createdAt)
+      }));
+  },
+
+  applyDanmakuMessage(item) {
+    if (!item || item.liveRoomId !== this.data.liveRoomId || (item.status || "VISIBLE") !== "VISIBLE") {
+      return;
+    }
+
+    const message = {
       ...item,
       createdAtText: time(item.createdAt)
-    }));
+    };
+    const messages = [
+      message,
+      ...this.data.danmakuMessages.filter((current) => current.id !== message.id)
+    ].slice(0, 20);
+
+    this.setData({
+      danmakuMessages: messages,
+      stageDanmakuMessages: messages.slice(0, 5)
+    });
+  },
+
+  removeDanmakuMessage(messageId) {
+    const messages = this.data.danmakuMessages.filter((item) => item.id !== messageId);
+    this.setData({
+      danmakuMessages: messages,
+      stageDanmakuMessages: messages.slice(0, 5)
+    });
+  },
+
+  removeDanmakuUser(userId) {
+    const messages = this.data.danmakuMessages.filter((item) => item.userId !== userId);
+    this.setData({
+      danmakuMessages: messages,
+      stageDanmakuMessages: messages.slice(0, 5)
+    });
   },
 
   usePollingRealtime() {

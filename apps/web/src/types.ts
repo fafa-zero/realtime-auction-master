@@ -53,6 +53,19 @@ export interface DanmakuMessage {
   nickname: string;
   content: string;
   createdAt: number;
+  status?: "VISIBLE" | "RETRACTED";
+  retractedAt?: number;
+  retractedBy?: string;
+  retractionReason?: string;
+}
+
+export interface DanmakuBlockedUser {
+  liveRoomId: string;
+  userId: string;
+  nickname: string;
+  reason: string;
+  blockedAt: number;
+  blockedBy: string;
 }
 
 export interface Order {

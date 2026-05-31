@@ -7,12 +7,14 @@ import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import { z } from "zod";
 import {
   cancelAuction,
+  blockDanmakuUser,
   detectBidRisk,
   getAuctionHistory,
   generateAuctionSummary,
   generateProductScript,
   getAuction,
   getSnapshot,
+  getDanmakuBlockedUsers,
   getDanmakuMessages,
   getLiveRoom,
   getLiveRooms,
@@ -28,6 +30,7 @@ import {
   placeBid,
   registerMiniprogram,
   registerWebUser,
+  retractDanmakuMessage,
   sendDanmakuMessage,
   settleAuction,
   startAuction,
@@ -269,6 +272,66 @@ app.post("/api/live-rooms/:liveRoomId/danmaku", (req, res) => {
     res.json({ ok: true, message });
   } catch (error) {
     res.status(400).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
+app.get("/api/live-rooms/:liveRoomId/danmaku/blocked-users", (req, res) => {
+  try {
+    assertLiveRoom(req.params.liveRoomId);
+    requireHostUser(req);
+    res.json({
+      ok: true,
+      items: getDanmakuBlockedUsers(req.params.liveRoomId)
+    });
+  } catch (error) {
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
+app.post("/api/live-rooms/:liveRoomId/danmaku/:messageId/retract", (req, res) => {
+  try {
+    assertLiveRoom(req.params.liveRoomId);
+    const moderator = requireHostUser(req);
+    const schema = z.object({
+      reason: z.string().max(80).optional()
+    });
+    const input = schema.parse(req.body ?? {});
+    const message = retractDanmakuMessage({
+      liveRoomId: req.params.liveRoomId,
+      messageId: req.params.messageId,
+      moderatorUserId: moderator.id,
+      reason: input.reason
+    });
+
+    broadcastAuctionEvent(req.params.liveRoomId, "danmaku:retracted", message);
+    res.json({ ok: true, message });
+  } catch (error) {
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
+app.post("/api/live-rooms/:liveRoomId/danmaku/block-user", (req, res) => {
+  try {
+    assertLiveRoom(req.params.liveRoomId);
+    const moderator = requireHostUser(req);
+    const schema = z.object({
+      userId: z.string().min(1),
+      nickname: z.string().min(1).max(40),
+      reason: z.string().max(80).optional()
+    });
+    const input = schema.parse(req.body ?? {});
+    const blockedUser = blockDanmakuUser({
+      liveRoomId: req.params.liveRoomId,
+      userId: input.userId,
+      nickname: input.nickname,
+      moderatorUserId: moderator.id,
+      reason: input.reason
+    });
+
+    broadcastAuctionEvent(req.params.liveRoomId, "danmaku:user-blocked", blockedUser);
+    res.json({ ok: true, blockedUser });
+  } catch (error) {
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
   }
 });
 
@@ -919,6 +982,16 @@ function getOptionalAuthUser(req: express.Request) {
   } catch {
     return null;
   }
+}
+
+function requireHostUser(req: express.Request) {
+  const user = getUserByToken(getAuthToken(req));
+
+  if (user.role !== "HOST" && user.role !== "ADMIN") {
+    throw new Error("需要主播或管理员权限");
+  }
+
+  return user;
 }
 
 function resolveBidder(

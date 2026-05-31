@@ -32,6 +32,7 @@ import type {
   AuctionSnapshot,
   AuctionStatus,
   AuthUser,
+  DanmakuBlockedUser,
   DanmakuMessage,
   LiveRoom,
   Order,
@@ -161,6 +162,7 @@ export function App() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [productQueue, setProductQueue] = useState<ProductQueueItem[]>([]);
   const [danmakuMessages, setDanmakuMessages] = useState<DanmakuMessage[]>([]);
+  const [danmakuBlockedUsers, setDanmakuBlockedUsers] = useState<DanmakuBlockedUser[]>([]);
   const [danmakuText, setDanmakuText] = useState("");
   const [sendingDanmaku, setSendingDanmaku] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
@@ -236,6 +238,7 @@ export function App() {
     setSnapshot(null);
     setLiveRoom(null);
     setDanmakuMessages([]);
+    setDanmakuBlockedUsers([]);
     setLoadError(null);
     setConnected(false);
     setMessage(`正在进入直播间 ${liveRoomId}...`);
@@ -270,6 +273,7 @@ export function App() {
         setCeilingPrice(String(auctionData.auction.ceilingPrice));
         void refreshArchiveData();
         void refreshProductQueue();
+        void refreshDanmakuBlockedUsers();
       } catch (error) {
         if (cancelled) {
           return;
@@ -322,10 +326,10 @@ export function App() {
 
     socket.on("auction:snapshot", updateSnapshot);
     socket.on("danmaku:history", (items: DanmakuMessage[]) => {
-      setDanmakuMessages((items ?? []).filter((item) => item.liveRoomId === liveRoomId).slice(0, 80));
+      setDanmakuMessages((items ?? []).filter((item) => isVisibleDanmaku(item, liveRoomId)).slice(0, 80));
     });
     socket.on("danmaku:new", (item: DanmakuMessage) => {
-      if (item.liveRoomId !== liveRoomId) {
+      if (!isVisibleDanmaku(item, liveRoomId)) {
         return;
       }
 
@@ -336,6 +340,26 @@ export function App() {
 
         return [item, ...current].slice(0, 80);
       });
+    });
+    socket.on("danmaku:retracted", (item: DanmakuMessage) => {
+      if (item.liveRoomId !== liveRoomId) {
+        return;
+      }
+
+      setDanmakuMessages((current) => current.filter((message) => message.id !== item.id));
+      setMessage(`弹幕已撤回：${item.retractionReason ?? "主播撤回"}`);
+    });
+    socket.on("danmaku:user-blocked", (item: DanmakuBlockedUser) => {
+      if (item.liveRoomId !== liveRoomId) {
+        return;
+      }
+
+      setDanmakuMessages((current) => current.filter((message) => message.userId !== item.userId));
+      setDanmakuBlockedUsers((current) => {
+        const rest = current.filter((user) => user.userId !== item.userId);
+        return [item, ...rest];
+      });
+      setMessage(`${item.nickname} 已被屏蔽：${item.reason}`);
     });
     socket.on("auction:started", (data: AuctionSnapshot) => {
       if (updateSnapshot(data)) {
@@ -840,6 +864,77 @@ export function App() {
     }
   }
 
+  async function refreshDanmakuBlockedUsers() {
+    if (viewMode !== "host") {
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/danmaku/blocked-users`, {
+        headers: getAuthHeaders(session)
+      });
+      const data = await readJson<{ items?: DanmakuBlockedUser[]; message?: string }>(res);
+
+      if (res.ok) {
+        setDanmakuBlockedUsers(data.items ?? []);
+      }
+    } catch {
+      // Moderation list is secondary; keep the live room usable.
+    }
+  }
+
+  async function retractDanmaku(messageId: string) {
+    const res = await fetch(
+      `${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/danmaku/${encodeURIComponent(messageId)}/retract`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(session)
+        },
+        body: JSON.stringify({ reason: "主播撤回" })
+      }
+    );
+    const data = await readJson<{ message?: DanmakuMessage | string }>(res);
+
+    if (!res.ok) {
+      setMessage(typeof data.message === "string" ? data.message : "弹幕撤回失败");
+      return;
+    }
+
+    setDanmakuMessages((current) => current.filter((item) => item.id !== messageId));
+    setMessage("弹幕已撤回");
+  }
+
+  async function blockDanmakuUser(item: DanmakuMessage) {
+    const res = await fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/danmaku/block-user`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeaders(session)
+      },
+      body: JSON.stringify({
+        userId: item.userId,
+        nickname: item.nickname,
+        reason: "主播屏蔽"
+      })
+    });
+    const data = await readJson<{ blockedUser?: DanmakuBlockedUser; message?: string }>(res);
+
+    if (!res.ok || !data.blockedUser) {
+      setMessage(data.message ?? "屏蔽用户失败");
+      return;
+    }
+
+    const blockedUser = data.blockedUser;
+    setDanmakuMessages((current) => current.filter((message) => message.userId !== item.userId));
+    setDanmakuBlockedUsers((current) => {
+      const rest = current.filter((user) => user.userId !== item.userId);
+      return [blockedUser, ...rest];
+    });
+    setMessage(`${item.nickname} 已被屏蔽`);
+  }
+
   async function handleProductFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
 
@@ -1098,6 +1193,57 @@ export function App() {
             {sendingDanmaku ? "发送中" : "发送弹幕"}
           </button>
         </form>
+
+        {viewMode === "host" ? (
+          <section className="danmaku-moderation">
+            <div className="section-title">
+              <ShieldAlert size={18} />
+              <h2>弹幕治理</h2>
+            </div>
+            <div className="danmaku-moderation-grid">
+              <div>
+                <strong>最近弹幕</strong>
+                <div className="danmaku-review-list">
+                  {danmakuMessages.length === 0 ? (
+                    <p className="muted">暂无弹幕</p>
+                  ) : (
+                    danmakuMessages.slice(0, 6).map((item) => (
+                      <div className="danmaku-review-row" key={item.id}>
+                        <div>
+                          <span>{item.nickname}</span>
+                          <p>{item.content}</p>
+                        </div>
+                        <div>
+                          <button title="撤回弹幕" onClick={() => retractDanmaku(item.id)}>
+                            撤回
+                          </button>
+                          <button title="屏蔽用户" onClick={() => blockDanmakuUser(item)}>
+                            屏蔽
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+              <div>
+                <strong>已屏蔽用户</strong>
+                <div className="blocked-user-list">
+                  {danmakuBlockedUsers.length === 0 ? (
+                    <p className="muted">暂无屏蔽用户</p>
+                  ) : (
+                    danmakuBlockedUsers.slice(0, 6).map((item) => (
+                      <div className="blocked-user-row" key={`${item.liveRoomId}-${item.userId}`}>
+                        <span>{item.nickname}</span>
+                        <small>{item.reason}</small>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          </section>
+        ) : null}
 
         <div className="product-strip">
           <div>
@@ -1950,6 +2096,10 @@ function Metric(props: { label: string; value: string }) {
       <strong>{props.value}</strong>
     </div>
   );
+}
+
+function isVisibleDanmaku(item: DanmakuMessage, liveRoomId: string) {
+  return item.liveRoomId === liveRoomId && (item.status ?? "VISIBLE") === "VISIBLE";
 }
 
 function getQueueStats(items: ProductQueueItem[], orders: Order[]) {

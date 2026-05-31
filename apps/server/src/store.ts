@@ -14,6 +14,7 @@ import type {
   Session,
   User,
   BidRisk,
+  DanmakuBlockedUser,
   DanmakuMessage
 } from "./types.js";
 
@@ -82,6 +83,8 @@ const orders: Order[] = [];
 const users: User[] = [];
 const sessions: Session[] = [];
 const danmakuMessages: DanmakuMessage[] = [];
+const danmakuBlockedUsers: DanmakuBlockedUser[] = [];
+const danmakuRateLimits = new Map<string, number[]>();
 
 loadState();
 ensureDemoWebAccounts();
@@ -132,6 +135,9 @@ const RISK_REPEAT_BID_LIMIT = 3;
 const RISK_LARGE_JUMP_MULTIPLIER = 5;
 const RISK_EXTREME_JUMP_MULTIPLIER = 10;
 const DANMAKU_HISTORY_LIMIT = 80;
+const DANMAKU_RATE_LIMIT_WINDOW_MS = 10_000;
+const DANMAKU_RATE_LIMIT_COUNT = 5;
+const DANMAKU_SENSITIVE_WORDS = ["假货", "骗子", "诈骗", "刷单", "加微信", "私聊"];
 
 export function getLiveRooms() {
   return liveRooms.map((room) => enrichLiveRoom(room));
@@ -194,9 +200,18 @@ export function getDanmakuMessages(liveRoomId = DEFAULT_LIVE_ROOM_ID) {
   requireLiveRoom(liveRoomId);
 
   return danmakuMessages
-    .filter((message) => message.liveRoomId === liveRoomId)
+    .filter((message) => isVisibleDanmakuMessage(message, liveRoomId))
     .slice(0, DANMAKU_HISTORY_LIMIT)
     .map((message) => ({ ...message }));
+}
+
+export function getDanmakuBlockedUsers(liveRoomId = DEFAULT_LIVE_ROOM_ID) {
+  requireLiveRoom(liveRoomId);
+
+  return danmakuBlockedUsers
+    .filter((item) => item.liveRoomId === liveRoomId)
+    .sort((a, b) => b.blockedAt - a.blockedAt)
+    .map((item) => ({ ...item }));
 }
 
 export function sendDanmakuMessage(input: {
@@ -207,6 +222,8 @@ export function sendDanmakuMessage(input: {
 }) {
   requireLiveRoom(input.liveRoomId);
   const content = normalizeDanmakuContent(input.content);
+  assertDanmakuUserAllowed(input.liveRoomId, input.userId);
+  assertDanmakuRateLimit(input.liveRoomId, input.userId);
   const nickname = input.nickname.trim() || "匿名用户";
   const message: DanmakuMessage = {
     id: randomUUID(),
@@ -214,7 +231,8 @@ export function sendDanmakuMessage(input: {
     userId: input.userId,
     nickname: nickname.slice(0, 40),
     content,
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    status: "VISIBLE"
   };
 
   danmakuMessages.unshift(message);
@@ -222,6 +240,70 @@ export function sendDanmakuMessage(input: {
   saveState();
 
   return { ...message };
+}
+
+export function retractDanmakuMessage(input: {
+  liveRoomId: string;
+  messageId: string;
+  moderatorUserId: string;
+  reason?: string;
+}) {
+  requireLiveRoom(input.liveRoomId);
+  const message = danmakuMessages.find(
+    (item) => item.id === input.messageId && item.liveRoomId === input.liveRoomId
+  );
+
+  if (!message) {
+    throw new Error("弹幕不存在");
+  }
+
+  if ((message.status ?? "VISIBLE") === "RETRACTED") {
+    return { ...message };
+  }
+
+  message.status = "RETRACTED";
+  message.retractedAt = Date.now();
+  message.retractedBy = input.moderatorUserId;
+  message.retractionReason = input.reason?.trim() || "主播撤回";
+  saveState();
+
+  return { ...message };
+}
+
+export function blockDanmakuUser(input: {
+  liveRoomId: string;
+  userId: string;
+  nickname: string;
+  moderatorUserId: string;
+  reason?: string;
+}) {
+  requireLiveRoom(input.liveRoomId);
+
+  if (input.userId === input.moderatorUserId) {
+    throw new Error("不能屏蔽自己");
+  }
+
+  const existing = danmakuBlockedUsers.find(
+    (item) => item.liveRoomId === input.liveRoomId && item.userId === input.userId
+  );
+  const blockedUser: DanmakuBlockedUser = {
+    liveRoomId: input.liveRoomId,
+    userId: input.userId,
+    nickname: input.nickname.trim() || input.userId,
+    reason: input.reason?.trim() || "主播屏蔽",
+    blockedAt: Date.now(),
+    blockedBy: input.moderatorUserId
+  };
+
+  if (existing) {
+    Object.assign(existing, blockedUser);
+  } else {
+    danmakuBlockedUsers.unshift(blockedUser);
+  }
+
+  saveState();
+
+  return { ...blockedUser };
 }
 
 export function getOrder(orderId: string) {
@@ -1212,7 +1294,8 @@ function saveState() {
         bids,
         orders,
         history,
-        danmakuMessages
+        danmakuMessages,
+        danmakuBlockedUsers
       },
       null,
       2
@@ -1232,6 +1315,7 @@ function loadState() {
       orders?: Order[];
       history?: AuctionHistoryItem[];
       danmakuMessages?: DanmakuMessage[];
+      danmakuBlockedUsers?: DanmakuBlockedUser[];
       auction?: Partial<Auction>;
       order?: Order | null;
     };
@@ -1278,6 +1362,10 @@ function loadState() {
       for (const liveRoom of liveRooms) {
         trimDanmakuMessages(liveRoom.id);
       }
+    }
+
+    if (Array.isArray(data.danmakuBlockedUsers)) {
+      danmakuBlockedUsers.splice(0, danmakuBlockedUsers.length, ...data.danmakuBlockedUsers);
     }
   } catch {
     // Missing or invalid state file falls back to the seeded demo data.
@@ -1350,7 +1438,45 @@ function normalizeDanmakuContent(content: string) {
     throw new Error("弹幕内容不能超过 80 个字符");
   }
 
+  const lowerContent = normalized.toLowerCase();
+  const sensitiveWord = DANMAKU_SENSITIVE_WORDS.find((word) => lowerContent.includes(word.toLowerCase()));
+
+  if (sensitiveWord) {
+    throw new Error(`弹幕包含敏感词：${sensitiveWord}`);
+  }
+
   return normalized;
+}
+
+function isVisibleDanmakuMessage(message: DanmakuMessage, liveRoomId: string) {
+  return (
+    message.liveRoomId === liveRoomId &&
+    (message.status ?? "VISIBLE") === "VISIBLE" &&
+    !danmakuBlockedUsers.some((item) => item.liveRoomId === liveRoomId && item.userId === message.userId)
+  );
+}
+
+function assertDanmakuUserAllowed(liveRoomId: string, userId: string) {
+  const blockedUser = danmakuBlockedUsers.find((item) => item.liveRoomId === liveRoomId && item.userId === userId);
+
+  if (blockedUser) {
+    throw new Error(`你已被屏蔽，无法发送弹幕：${blockedUser.reason}`);
+  }
+}
+
+function assertDanmakuRateLimit(liveRoomId: string, userId: string) {
+  const key = `${liveRoomId}:${userId}`;
+  const now = Date.now();
+  const recent = (danmakuRateLimits.get(key) ?? []).filter(
+    (createdAt) => now - createdAt <= DANMAKU_RATE_LIMIT_WINDOW_MS
+  );
+
+  if (recent.length >= DANMAKU_RATE_LIMIT_COUNT) {
+    throw new Error(`弹幕发送过快，请 ${Math.ceil(DANMAKU_RATE_LIMIT_WINDOW_MS / 1000)} 秒后再试`);
+  }
+
+  recent.push(now);
+  danmakuRateLimits.set(key, recent);
 }
 
 function trimDanmakuMessages(liveRoomId: string) {

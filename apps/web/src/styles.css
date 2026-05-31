@@ -479,6 +479,97 @@ h2 {
   font-weight: 800;
 }
 
+.danmaku-moderation {
+  margin-top: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.danmaku-moderation-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(180px, 0.6fr);
+  gap: 14px;
+}
+
+.danmaku-moderation-grid > div {
+  min-width: 0;
+}
+
+.danmaku-review-list,
+.blocked-user-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.danmaku-review-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid #eef2f5;
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.danmaku-review-row span,
+.blocked-user-row span {
+  display: block;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.danmaku-review-row p {
+  overflow: hidden;
+  margin: 4px 0 0;
+  color: #334250;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.danmaku-review-row > div:last-child {
+  display: flex;
+  gap: 6px;
+}
+
+.danmaku-review-row button {
+  min-height: 32px;
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.danmaku-review-row button:last-child {
+  border-color: #f0b8c0;
+  color: var(--accent-dark);
+  background: #fff1f3;
+}
+
+.blocked-user-row {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  border: 1px solid #eef2f5;
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.blocked-user-row small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .product-strip,
 .stats-grid,
 .panel-section,
@@ -1354,6 +1445,19 @@ h2 {
   }
 
   .danmaku-bar button {
+    width: 100%;
+  }
+
+  .danmaku-moderation-grid,
+  .danmaku-review-row {
+    grid-template-columns: 1fr;
+  }
+
+  .danmaku-review-row > div:last-child {
+    justify-content: stretch;
+  }
+
+  .danmaku-review-row button {
     width: 100%;
   }
 
