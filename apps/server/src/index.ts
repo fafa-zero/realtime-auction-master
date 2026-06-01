@@ -16,6 +16,7 @@ import {
   generateAuctionSummary,
   generateProductScript,
   getAuction,
+  getBidCount,
   getSnapshot,
   getDanmakuBlockedUsers,
   getDanmakuMessages,
@@ -26,6 +27,7 @@ import {
   getOrders,
   getOrdersForUser,
   getProductQueue,
+  getUserByAccount,
   getUserByToken,
   importAuctionProducts,
   loginMiniprogram,
@@ -91,6 +93,56 @@ function getLocalClientOrigins(clientUrl: string) {
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, serverTime: Date.now() });
+});
+
+app.get("/api/demo/check", (_req, res) => {
+  const rooms = getLiveRooms();
+  const demoHost = getUserByAccount("demo-host");
+  const demoBuyer = getUserByAccount("demo-buyer");
+  const hostRooms = demoHost ? getLiveRoomsForHost(demoHost.id) : [];
+  const standardRoomIds = new Set(["live-1", "live-2"]);
+  const standardRooms = rooms.filter((room) => standardRoomIds.has(room.id));
+  const roomChecks = standardRooms.map((room) => {
+    const snapshot = getSnapshot(room.id);
+
+    return {
+      id: room.id,
+      title: room.title,
+      ownerUserId: room.ownerUserId,
+      status: snapshot.auction.status,
+      productName: snapshot.product.name,
+      imageUrl: snapshot.product.imageUrl,
+      imageLocal: snapshot.product.imageUrl.startsWith("/static/"),
+      bidCount: getBidCount(room.id),
+      orderCount: getOrders(room.id).length
+    };
+  });
+  const checks = {
+    api: true,
+    staticImages: ["/static/jewelry.jpg", "/static/watch.jpg"],
+    demoHostExists: Boolean(demoHost),
+    demoBuyerExists: Boolean(demoBuyer),
+    standardRoomsReady:
+      standardRooms.length === 2 &&
+      roomChecks.every((room) => room.ownerUserId === "user-demo-host" && room.imageLocal),
+    demoHostRoomCount: hostRooms.length,
+    miniprogramApiCandidates: ["http://localhost:4300", "http://127.0.0.1:4300"],
+    miniprogramWsPath: "/miniprogram-ws"
+  };
+
+  res.json({
+    ok: Object.values({
+      api: checks.api,
+      demoHostExists: checks.demoHostExists,
+      demoBuyerExists: checks.demoBuyerExists,
+      standardRoomsReady: checks.standardRoomsReady,
+      demoHostHasRooms: checks.demoHostRoomCount >= 2
+    }).every(Boolean),
+    serverTime: Date.now(),
+    checks,
+    rooms: roomChecks,
+    recommendedAction: "如 ok 为 false，请用 demo-host 登录主播端后点击“重置演示数据”。"
+  });
 });
 
 const productManageSchema = z.object({
@@ -1094,6 +1146,7 @@ function recordToProductImportRow(record: SpreadsheetRecord): ProductImportRow {
     ceilingPrice: parseImportNumber(getRecordValue(record, "封顶价")),
     durationSeconds: parseImportNumber(getRecordValue(record, "竞拍时长秒", "竞拍时长")),
     stock: parseOptionalImportNumber(getRecordValue(record, "库存")),
+    imageUrl: getRecordValue(record, "商品图片", "图片", "图片地址", "imageUrl"),
     sellingPoints: getRecordValue(record, "商品卖点"),
     scriptKeywords: getRecordValue(record, "讲解关键词")
   };

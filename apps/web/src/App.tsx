@@ -539,7 +539,14 @@ export function App() {
   const myHistory = historyItems.filter((item) =>
     item.bids.some((bid) => bid.userId === userId || bid.nickname === nickname)
   );
-  const queueStats = getQueueStats(productQueue, orders);
+  const hostDashboardStats = snapshot
+    ? getHostDashboardStats({
+        snapshot,
+        liveRoom,
+        productQueue,
+        orders
+      })
+    : null;
   const currentQueueItem = snapshot
     ? productQueue.find((item) => item.product.id === snapshot.product.id) ?? null
     : null;
@@ -1573,10 +1580,12 @@ export function App() {
 
         {viewMode === "host" ? (
           <div className="queue-summary">
-            <Metric label="商品总数" value={`${queueStats.total} 件`} />
-            <Metric label="待竞拍" value={`${queueStats.queued} 件`} />
-            <Metric label="已成交" value={`${queueStats.sold} 件`} />
-            <Metric label="成交金额" value={formatMoney(queueStats.revenue)} />
+            <Metric label="观看人数" value={`${hostDashboardStats?.viewerCount ?? 0} 人`} />
+            <Metric label="出价次数" value={`${hostDashboardStats?.bidCount ?? 0} 次`} />
+            <Metric label="参与人数" value={`${hostDashboardStats?.participantCount ?? 0} 人`} />
+            <Metric label="成交率" value={`${hostDashboardStats?.conversionRate ?? 0}%`} />
+            <Metric label="GMV" value={formatMoney(hostDashboardStats?.gmv ?? 0)} />
+            <Metric label="待支付订单" value={`${hostDashboardStats?.pendingPaymentCount ?? 0} 笔`} />
           </div>
         ) : null}
       </section>
@@ -2634,18 +2643,26 @@ function getDanmakuSender(input: {
   };
 }
 
-function getQueueStats(items: ProductQueueItem[], orders: Order[]) {
-  const soldProductIds = new Set(
-    items.filter((item) => item.product.queueStatus === "SOLD").map((item) => item.product.id)
-  );
+function getHostDashboardStats(input: {
+  snapshot: AuctionSnapshot;
+  liveRoom: LiveRoom | null;
+  productQueue: ProductQueueItem[];
+  orders: Order[];
+}) {
+  const soldCount = input.productQueue.filter((item) => item.product.queueStatus === "SOLD").length;
+  const completedCount = input.productQueue.filter((item) =>
+    ["SOLD", "UNSOLD", "CANCELLED"].includes(item.product.queueStatus ?? "QUEUED")
+  ).length;
+  const paidOrders = input.orders.filter((order) => order.status === "PAID");
+  const allOrdersRevenue = input.orders.reduce((sum, order) => sum + order.finalPrice, 0);
 
   return {
-    total: items.length,
-    queued: items.filter((item) => item.product.queueStatus === "QUEUED").length,
-    sold: soldProductIds.size,
-    revenue: orders
-      .filter((order) => soldProductIds.has(order.productId))
-      .reduce((sum, order) => sum + order.finalPrice, 0)
+    viewerCount: input.liveRoom?.viewerCount ?? input.snapshot.participantCount,
+    bidCount: input.snapshot.bids.length,
+    participantCount: input.snapshot.participantCount,
+    conversionRate: completedCount > 0 ? Math.round((soldCount / completedCount) * 100) : 0,
+    gmv: paidOrders.length > 0 ? paidOrders.reduce((sum, order) => sum + order.finalPrice, 0) : allOrdersRevenue,
+    pendingPaymentCount: input.orders.filter((order) => order.status === "PENDING_PAYMENT").length
   };
 }
 

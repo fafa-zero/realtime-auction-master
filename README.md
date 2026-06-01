@@ -54,9 +54,10 @@ npm install
 推荐使用单端口稳定演示模式。Web、API、Socket.IO 和静态资源都由后端托管在 `4300`：
 
 ```bash
-npm --workspace apps/web run build
-PORT=4300 CLIENT_URL=http://localhost:4300 npm --workspace apps/server run start
+npm run demo
 ```
+
+该命令会先构建 Web 和后端，恢复标准演示数据，再用 `PORT=4300 CLIENT_URL=http://localhost:4300` 启动后端。
 
 打开：
 
@@ -94,7 +95,10 @@ Web 内置演示账号：
 - `demo-host / demo123` 默认拥有两个标准直播间：`live-1` 珠宝严选好物专场、`live-2` 腕表收藏好物专场。
 - 标准商品图片使用本地静态资源 `/static/jewelry.jpg` 和 `/static/watch.jpg`，不依赖外网图片。
 - 主播端商品管理区提供“重置演示数据”按钮，可恢复标准直播间、商品、竞拍、订单、弹幕、用户和会话。
+- 也可以在命令行执行 `npm run demo:reset` 恢复标准演示数据。
 - 重置后建议重新使用 `demo-host / demo123` 和 `demo-buyer / demo123` 登录演示。
+- 演示健康检查接口：`http://localhost:4300/api/demo/check`，可检查 API、演示账号、标准直播间、本地图片和小程序地址提示。
+- 商品导入模板 `docs/product-import-template.csv` 已包含“商品图片”列，可填写 `/static/jewelry.jpg`、`/static/watch.jpg` 或网络图片 URL。
 
 ## 微信小程序
 

@@ -217,6 +217,13 @@ export function getLiveRoomsForHost(userId: string) {
   return getLiveRooms().filter((room) => room.ownerUserId === userId);
 }
 
+export function getUserByAccount(account: string) {
+  const normalized = normalizeAccount(account);
+  const user = users.find((item) => item.account === normalized);
+
+  return user ? sanitizeUser(user) : null;
+}
+
 export function getAuction(liveRoomId = DEFAULT_LIVE_ROOM_ID) {
   return requireAuctionForLiveRoom(liveRoomId);
 }
@@ -260,6 +267,18 @@ export function getOrders(liveRoomId?: string) {
   return [...orderMap.values()]
     .filter((item) => !liveRoomId || getOrderLiveRoomId(item) === liveRoomId)
     .map((item) => ({ ...item }));
+}
+
+export function getBidCount(liveRoomId?: string) {
+  if (!liveRoomId) {
+    return bids.length;
+  }
+
+  const roomAuctionIds = new Set(
+    auctions.filter((auction) => auction.liveRoomId === liveRoomId).map((auction) => auction.id)
+  );
+
+  return bids.filter((bid) => roomAuctionIds.has(bid.auctionId)).length;
 }
 
 export function getOrdersForUser(userId: string, liveRoomId?: string) {
