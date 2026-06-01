@@ -2,7 +2,7 @@
 
 ## 测试范围
 
-本文档用于最终 Demo 前的手工测试记录，覆盖“Web 主播端开拍 → Web 观众预览 → 小程序注册/微信登录 → 小程序 REST 出价 → 多直播间隔离 → 生成订单 → 我的订单 → 支付权限校验 → AI 助手”的核心流程。
+本文档用于最终 Demo 前的手工测试记录，覆盖“Web 主播端开拍 → Web 观众预览 → 小程序注册/登录 → 小程序 WebSocket 实时同步与 HTTP 兜底出价 → 多直播间隔离 → 生成订单 → 我的订单 → 支付权限校验 → AI 助手”的核心流程。
 
 ## 测试环境
 
@@ -12,8 +12,8 @@
 | 后端 | Express + Socket.IO + 原生 WebSocket，本地演示推荐 `http://localhost:4300` |
 | 小程序 | 微信开发者工具打开 `apps/miniprogram` |
 | 小程序 API | 默认尝试 `http://localhost:4300` 和 `http://127.0.0.1:4300`，配置位置 `apps/miniprogram/utils/api.js` |
-| 小程序同步 | 当前小程序详情页使用 REST 轮询和 HTTP 出价，避免开发者工具 WebSocket timeout 影响演示 |
-| 存储 | 本地 JSON 文件，默认 `apps/server/data/auction-state.json` |
+| 小程序同步 | 优先使用 `/miniprogram-ws` WebSocket 实时同步；REST 轮询和 HTTP 出价/弹幕作为兜底 |
+| 存储 | MySQL 优先，JSON 兜底；默认本地 JSON 文件 `apps/server/data/auction-state.json` |
 | 浏览器 | Chrome / Edge |
 | 微信开发者工具 | 本地联调时开启“不校验合法域名、web-view、TLS 版本以及 HTTPS 证书” |
 | AI | 未配置模型时使用本地兜底；配置 `AI_API_URL`、`AI_API_KEY`、`AI_MODEL` 后调用兼容 Chat Completions 的模型 API |
@@ -22,11 +22,11 @@
 
 | 编号 | 检查项 | 预期结果 | 状态 |
 | --- | --- | --- | --- |
-| PRE-01 | 执行 `npm install` | 依赖安装成功 | 待执行 |
-| PRE-02 | 执行 `npm run typecheck` | 前后端类型检查通过 | 待执行 |
-| PRE-03 | 执行 `npm run build` | 前后端构建通过 | 待执行 |
-| PRE-04 | 执行 `npm run dev` | 前端和后端服务启动成功 | 待执行 |
-| PRE-05 | 访问 `GET /api/health` | 返回 `ok: true` 和 `serverTime` | 待执行 |
+| PRE-01 | 执行 `npm install` | 依赖安装成功 | 已安装 |
+| PRE-02 | 执行 `npm run typecheck` | 前后端类型检查通过 | 通过 |
+| PRE-03 | 执行 `npm run build` | 前后端构建通过 | 通过 |
+| PRE-04 | 执行 `PORT=4300 CLIENT_URL=http://localhost:4300 npm --workspace apps/server run start` | 4300 单端口服务启动成功 | 通过 |
+| PRE-05 | 访问 `GET /api/health` | 返回 `ok: true` 和 `serverTime` | 通过 |
 | PRE-06 | 打开 `apps/miniprogram` | 微信开发者工具可加载项目，无项目配置错误 | 待执行 |
 
 ## 核心流程用例
@@ -50,8 +50,8 @@
 
 | 编号 | 场景 | 操作步骤 | 预期结果 | 状态 |
 | --- | --- | --- | --- | --- |
-| ROOM-01 | 直播间列表 | 调用 `GET /api/live-rooms` | 返回至少 `live-1` 和 `live-2` 两个直播间 | 待执行 |
-| ROOM-02 | 独立快照 | 分别调用 `GET /api/live-rooms/live-1/auction` 和 `GET /api/live-rooms/live-2/auction` | 两个快照的 `auction.liveRoomId` 分别为 `live-1` 和 `live-2` | 待执行 |
+| ROOM-01 | 直播间列表 | 调用 `GET /api/live-rooms` | 返回至少 `live-1` 和 `live-2` 两个直播间 | 通过 |
+| ROOM-02 | 独立快照 | 分别调用 `GET /api/live-rooms/live-1/auction` 和 `GET /api/live-rooms/live-2/auction` | 两个快照的 `auction.liveRoomId` 分别为 `live-1` 和 `live-2` | 通过 |
 | ROOM-03 | 独立开拍 | 在 `/host?liveRoomId=live-1` 开拍，再切到 `/host?liveRoomId=live-2` 开拍 | 两个直播间可分别配置竞拍规则，互不覆盖 | 待执行 |
 | ROOM-04 | Socket.IO room 隔离 | 打开 `/live/live-1` 和 `/live/live-2`，只在 `live-1` 出价 | `live-1` 页面更新，`live-2` 页面不显示 `live-1` 出价 | 待执行 |
 | ROOM-05 | 订单隔离 | `live-2` 封顶成交后分别调用 `/api/live-rooms/live-1/orders` 和 `/api/live-rooms/live-2/orders` | `live-2` 返回新订单，`live-1` 不出现该订单 | 待执行 |
@@ -65,8 +65,8 @@
 | MP-03 | 买家登录 | 注册后切回“登录”，点击“登录进入专场” | 返回 `token`、`expiresAt` 和用户信息，显示 `live-1`、`live-2` 直播间 | 待执行 |
 | MP-04 | 查询当前用户 | 使用 `Authorization: Bearer <token>` 调用 `GET /api/me` | 返回与登录一致的用户昵称和 `role: BUYER` | 待执行 |
 | MP-05 | 小程序进入直播间 | 点击 `live-1` 直播间 | 页面展示模拟直播画面、商品、当前价、倒计时和出价记录 | 待执行 |
-| MP-06 | REST 轮询同步 | 小程序进入直播间后观察页面实时状态文本 | 显示轮询同步状态，价格和倒计时持续刷新 | 待执行 |
-| MP-07 | 小程序 HTTP 出价 | Web 主播端开拍后，小程序输入合法价格并出价 | 小程序通过 HTTP 提交出价，成功后页面价格更新 | 待执行 |
+| MP-06 | WebSocket 实时同步 | 小程序进入直播间后观察页面实时状态文本 | 显示 WebSocket 实时同步状态，价格和倒计时持续刷新 | 待执行 |
+| MP-07 | 小程序 HTTP 兜底出价 | Web 主播端开拍后，小程序输入合法价格并出价 | 小程序可通过 HTTP 兜底接口提交出价，成功后页面价格更新 | 待执行 |
 | MP-08 | Web + 小程序同步 | Web 观众预览页出价后观察小程序；小程序出价后观察 Web 预览页 | 两端均能收到同一直播间最新竞拍快照 | 待执行 |
 | MP-09 | 取消登录 | 小程序首页或直播页点击“取消登录” | 清除 token，返回登录入口，直播页不再展示专场内容 | 待执行 |
 
@@ -114,7 +114,7 @@
 
 | 编号 | 检查项 | 预期结果 | 状态 |
 | --- | --- | --- | --- |
-| DOC-01 | README | 包含项目定位、运行方式、环境变量、AI 配置、接口说明 | 待确认 |
+| DOC-01 | README | 包含项目定位、运行方式、环境变量、AI 配置、接口说明 | 已确认 |
 | DOC-02 | 最终 Demo 文档 | 包含演示步骤、视频脚本、架构图、AI 能力说明、提交前检查清单 | 待确认 |
 | DOC-03 | 团队信息 | 团队名称、成员名单、分工说明已填写真实信息 | 待填写 |
 | DOC-04 | 链接材料 | 在线 Demo、演示视频、源代码仓库链接已填写 | 待填写 |

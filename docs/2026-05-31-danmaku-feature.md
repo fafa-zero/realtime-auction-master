@@ -34,9 +34,9 @@
 - 弹幕按 `liveRoomId` 隔离，不会串到其他直播间。
 - 单条弹幕内容最多 80 个字符。
 - 服务端保留每个直播间最近 80 条弹幕。
-- 弹幕写入 `auction-state.json`，重启后可恢复历史。
+- 弹幕写入持久化存储；启用 MySQL 时写入 MySQL，未配置数据库时写入 `auction-state.json` 兜底，重启后可恢复历史。
 - Web 端通过 Socket.IO 实时发送和接收。
-- 小程序端当前通过 HTTP 接口发送和拉取历史，同时服务端已支持 WebSocket 弹幕协议。
+- 小程序端优先通过 `/miniprogram-ws` 接收实时事件，并保留 HTTP 接口发送和拉取历史作为兜底。
 
 ## Web 端实现
 
@@ -96,6 +96,7 @@
 - 已限制订单支付必须由订单所属买家完成。
 - 已补后端集成测试脚本 `npm --workspace apps/server run test:integration`。
 - 集成测试覆盖买家注册/登录、Web/小程序共用账号接口、出价、封顶成交、支付权限、弹幕发送、敏感词、限频、跨直播间隔离、弹幕撤回权限和主播不能出价。
+- 已增加 MySQL 持久化支持，配置 `AUCTION_STORAGE=mysql` 或 `DATABASE_URL` / `MYSQL_*` 后优先使用 MySQL，未配置或不可用时继续 JSON 兜底。
 
 ## 后续升级优先级
 

@@ -40,7 +40,8 @@ Web 页面和小程序必须连到同一个 `4300` 后端实例，才能共享�
 - `pages/orders/index`：我的订单。
 - 小程序买家登录和注册复用 Web 账号体系，统一调用 `/api/auth/web/register` 和 `/api/auth/web/login`。
 - 首页区分买家注册和买家登录；注册需要账号、密码和买家昵称，登录需要账号和密码。
-- 详情页使用 REST 轮询同步，出价也走 HTTP 接口，避免微信开发者工具 WebSocket timeout 阻断演示。
+- 详情页优先连接 `/miniprogram-ws` 实时接收竞拍快照、出价、成交、支付和弹幕事件。
+- REST 轮询与 HTTP 出价/弹幕接口保留为兜底，避免微信开发者工具 WebSocket timeout 阻断演示。
 
 ## 生产边界
 

@@ -1116,8 +1116,17 @@ export function App() {
       setHistoryItems([]);
       clearProductForm();
       setMessage("演示数据已重置");
-      void refreshProductQueue();
-      void refreshArchiveData();
+
+      if (session?.user.account === "demo-host") {
+        const nextSession = await loginWeb(demoWebAccounts.HOST);
+        setSession(nextSession);
+        writeStoredSession(nextSession);
+      } else {
+        setSession(null);
+        writeStoredSession(null);
+      }
+
+      navigateTo("/host?liveRoomId=live-1", setRoute);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "重置演示数据失败");
     } finally {

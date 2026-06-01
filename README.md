@@ -18,7 +18,7 @@
 - 主播端不能出价，买家出价统一从 Web 观众端或小程序端完成。
 - 竞拍支持起拍价、最低加价、封顶价、倒计时、成交/流拍/取消。
 - 达到封顶价自动成交，并生成模拟订单。
-- Web Socket.IO 实时同步竞拍和弹幕；小程序通过 REST 轮询与提交接口稳定演示。
+- Web Socket.IO 实时同步竞拍和弹幕；小程序通过 `/miniprogram-ws` 实时同步，REST 轮询与 HTTP 提交接口作为兜底。
 - 弹幕支持发送、历史列表、飞屏展示、限频、敏感词过滤、主播撤回和屏蔽用户。
 - AI 助手支持商品讲解词、竞拍复盘和异常出价提示；未配置模型时有本地兜底结果。
 - 本地 JSON 持久化，重启后保留用户、会话、直播间、竞拍、订单和弹幕。
@@ -139,6 +139,13 @@ Web：
 PORT=4300
 CLIENT_URL=http://localhost:4300
 AUCTION_DATA_FILE=data/auction-state.json
+AUCTION_STORAGE=json
+DATABASE_URL=
+MYSQL_HOST=127.0.0.1
+MYSQL_PORT=3306
+MYSQL_USER=root
+MYSQL_PASSWORD=
+MYSQL_DATABASE=realtime_auction
 AI_API_URL=
 AI_API_KEY=
 AI_MODEL=
@@ -148,10 +155,51 @@ AI_MODEL=
 
 - `PORT`：后端端口。
 - `CLIENT_URL`：允许跨域的 Web 地址。
-- `AUCTION_DATA_FILE`：本地状态文件路径。
+- `AUCTION_STORAGE`：设置为 `mysql` 时启用 MySQL 持久化；未配置时使用本地 JSON。
+- `DATABASE_URL`：MySQL 连接字符串，优先级高于拆分的 `MYSQL_*` 配置。
+- `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DATABASE`：MySQL 连接配置。
+- `AUCTION_DATA_FILE`：JSON 兜底状态文件路径；MySQL 不可用时仍可保证本地演示。
 - `AI_API_URL` / `AI_API_KEY` / `AI_MODEL`：可选 AI 模型配置。
 
 未配置 AI 时，系统会使用本地兜底生成讲解词、复盘和风险提示，保证演示不中断。
+
+## MySQL 持久化
+
+毕设成品建议使用 MySQL。项目支持 MySQL 优先、JSON 兜底：
+
+1. 安装 MySQL 驱动：
+
+```bash
+npm install mysql2 --workspace apps/server
+```
+
+2. 初始化数据库：
+
+```bash
+mysql -u root -p < apps/server/db/mysql-schema.sql
+```
+
+3. 启动时启用 MySQL：
+
+```bash
+AUCTION_STORAGE=mysql \
+MYSQL_HOST=127.0.0.1 \
+MYSQL_PORT=3306 \
+MYSQL_USER=root \
+MYSQL_PASSWORD=your_password \
+MYSQL_DATABASE=realtime_auction \
+PORT=4300 \
+CLIENT_URL=http://localhost:4300 \
+npm --workspace apps/server run start
+```
+
+也可以使用连接字符串：
+
+```bash
+DATABASE_URL=mysql://root:your_password@127.0.0.1:3306/realtime_auction
+```
+
+当前 MySQL 表按业务实体拆分为直播间、用户、会话、商品、竞拍、出价、订单、历史、弹幕和屏蔽用户表。每张表用 `entity_key + data_json` 保存实体快照，适合演示阶段稳定迁移；后续可继续拆成完全范式化字段表。
 
 ## 核心接口
 

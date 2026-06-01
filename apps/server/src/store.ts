@@ -2,6 +2,12 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { completeWithModel } from "./ai.js";
+import {
+  isMysqlPersistenceConfigured,
+  loadMysqlState,
+  saveMysqlState,
+  type PersistedAuctionState
+} from "./mysqlPersistence.js";
 import type {
   Auction,
   AuctionHistoryItem,
@@ -20,6 +26,9 @@ import type {
 
 const DATA_FILE = resolve(process.env.AUCTION_DATA_FILE ?? "data/auction-state.json");
 const DEFAULT_LIVE_ROOM_ID = "live-1";
+const DEMO_HOST_USER_ID = "user-demo-host";
+const DEFAULT_JEWELRY_IMAGE_URL = "/static/jewelry.jpg";
+const DEFAULT_WATCH_IMAGE_URL = "/static/watch.jpg";
 
 const products: Product[] = createDefaultProducts();
 const liveRooms: LiveRoom[] = createDefaultLiveRooms();
@@ -37,6 +46,8 @@ const danmakuRateLimits = new Map<string, number[]>();
 
 loadState();
 ensureDemoWebAccounts();
+ensureDemoLiveRoomOwnership();
+ensureLocalDemoProductImages();
 rebuildProcessedBidRequestIds();
 
 export interface StartAuctionOptions {
@@ -79,6 +90,31 @@ export interface ProductImportRow {
 
 export type ProductManageInput = ProductImportRow;
 
+export async function initializePersistence() {
+  if (!isMysqlPersistenceConfigured()) {
+    return;
+  }
+
+  try {
+    const data = await loadMysqlState();
+    mysqlPersistenceReady = true;
+
+    if (data) {
+      applyPersistedState(data);
+      ensureDemoWebAccounts();
+      ensureDemoLiveRoomOwnership();
+      ensureLocalDemoProductImages();
+      rebuildProcessedBidRequestIds();
+    }
+
+    saveState();
+    console.log("MySQL persistence is enabled");
+  } catch (error) {
+    mysqlPersistenceDisabled = true;
+    console.warn(`MySQL 持久化不可用，已回落本地 JSON：${error instanceof Error ? error.message : "未知错误"}`);
+  }
+}
+
 export interface CreateLiveRoomInput {
   ownerUserId: string;
   title: string;
@@ -103,20 +139,22 @@ const DANMAKU_HISTORY_LIMIT = 80;
 const DANMAKU_RATE_LIMIT_WINDOW_MS = 10_000;
 const DANMAKU_RATE_LIMIT_COUNT = 5;
 const DANMAKU_SENSITIVE_WORDS = ["假货", "骗子", "诈骗", "刷单", "加微信", "私聊"];
+let mysqlPersistenceReady = false;
+let mysqlPersistenceDisabled = false;
 
 function createDefaultProducts(): Product[] {
   return [
     {
       id: "product-1",
       name: "天然翡翠吊坠",
-      imageUrl: "/static/jewelry.jpg",
+      imageUrl: DEFAULT_JEWELRY_IMAGE_URL,
       description: "好物专场演示商品，适合用于演示实时互动、价格更新和订单确认流程。",
       stock: 1
     },
     {
       id: "product-2",
       name: "复古机械腕表",
-      imageUrl: "/static/watch.jpg",
+      imageUrl: DEFAULT_WATCH_IMAGE_URL,
       description: "第二个好物专场演示商品，用于验证多专场状态隔离和用户入口切换。",
       stock: 1
     }
@@ -131,7 +169,8 @@ function createDefaultLiveRooms(): LiveRoom[] {
       hostName: "小雅",
       streamUrl: "https://example.com/mock/jewelry-live.m3u8",
       viewerCount: 1286,
-      currentAuctionId: "auction-1"
+      currentAuctionId: "auction-1",
+      ownerUserId: DEMO_HOST_USER_ID
     },
     {
       id: "live-2",
@@ -139,7 +178,8 @@ function createDefaultLiveRooms(): LiveRoom[] {
       hostName: "阿辰",
       streamUrl: "https://example.com/mock/watch-live.m3u8",
       viewerCount: 842,
-      currentAuctionId: "auction-2"
+      currentAuctionId: "auction-2",
+      ownerUserId: DEMO_HOST_USER_ID
     }
   ];
 }
@@ -230,6 +270,7 @@ export function createLiveRoom(input: CreateLiveRoomInput) {
   const normalized = normalizeProductImportRow({
     name: input.productName,
     description: input.productDescription,
+    imageUrl: getDefaultProductImageUrl(input.productName, input.title),
     startPrice: input.startPrice,
     incrementStep: input.incrementStep,
     ceilingPrice: input.ceilingPrice,
@@ -254,7 +295,7 @@ export function createLiveRoom(input: CreateLiveRoomInput) {
     id: productId,
     liveRoomId: roomId,
     name: normalized.name,
-    imageUrl: "",
+    imageUrl: normalized.imageUrl ?? getDefaultProductImageUrl(normalized.name, liveRoom.title),
     description: normalized.description,
     startPrice: normalized.startPrice,
     incrementStep: normalized.incrementStep,
@@ -574,7 +615,7 @@ export function importAuctionProducts(liveRoomId: string, rows: ProductImportRow
       const product: Product = {
         id: `product-${randomUUID()}`,
         liveRoomId,
-        imageUrl: "",
+        imageUrl: normalized.imageUrl ?? getDefaultProductImageUrl(normalized.name, liveRoom.title),
         name: normalized.name,
         description: normalized.description,
         startPrice: normalized.startPrice,
@@ -626,7 +667,7 @@ export function createAuctionProduct(liveRoomId: string, input: ProductManageInp
   const product: Product = {
     id: `product-${randomUUID()}`,
     liveRoomId,
-    imageUrl: input.imageUrl?.trim() || "",
+    imageUrl: normalized.imageUrl ?? getDefaultProductImageUrl(normalized.name, liveRoom.title),
     name: normalized.name,
     description: normalized.description,
     startPrice: normalized.startPrice,
@@ -1128,6 +1169,9 @@ export function resetDemoState() {
   danmakuRateLimits.clear();
   processedBidRequestIds.clear();
   ensureDemoWebAccounts();
+  ensureDemoLiveRoomOwnership();
+  ensureLocalDemoProductImages();
+  rebuildProcessedBidRequestIds();
   saveState();
 
   return {
@@ -1315,7 +1359,7 @@ function assessBidRisk(input: {
 function ensureDemoWebAccounts() {
   const demoUsers: User[] = [
     {
-      id: "user-demo-host",
+      id: DEMO_HOST_USER_ID,
       account: "demo-host",
       password: "demo123",
       nickname: "演示主播",
@@ -1339,6 +1383,38 @@ function ensureDemoWebAccounts() {
       users.push(demoUser);
     }
   }
+}
+
+function ensureDemoLiveRoomOwnership() {
+  for (const liveRoom of liveRooms) {
+    if ((liveRoom.id === "live-1" || liveRoom.id === "live-2") && !liveRoom.ownerUserId) {
+      liveRoom.ownerUserId = DEMO_HOST_USER_ID;
+    }
+  }
+}
+
+function ensureLocalDemoProductImages() {
+  for (const product of products) {
+    if (!product.imageUrl || isLegacyRemoteDemoImage(product.imageUrl)) {
+      const liveRoom = product.liveRoomId ? liveRooms.find((room) => room.id === product.liveRoomId) : undefined;
+      product.imageUrl = getDefaultProductImageUrl(product.name, liveRoom?.title);
+    }
+  }
+}
+
+function getDefaultProductImageUrl(productName = "", liveRoomTitle = "") {
+  const text = `${productName} ${liveRoomTitle}`;
+
+  if (/表|腕表|watch|灯|台灯/i.test(text)) {
+    return DEFAULT_WATCH_IMAGE_URL;
+  }
+
+  return DEFAULT_JEWELRY_IMAGE_URL;
+}
+
+function isLegacyRemoteDemoImage(imageUrl: string) {
+  return imageUrl.includes("images.unsplash.com/photo-1605100804763-247f67b3557e") ||
+    imageUrl.includes("images.unsplash.com/photo-1522312346375-d1a52e2b99b3");
 }
 
 function createSession(userId: string): Session {
@@ -1540,94 +1616,111 @@ function getErrorMessage(error: unknown) {
 }
 
 function saveState() {
+  const state = getPersistedState();
+
   mkdirSync(dirname(DATA_FILE), { recursive: true });
-  writeFileSync(
-    DATA_FILE,
-    JSON.stringify(
-      {
-        liveRooms,
-        users,
-        sessions,
-        products,
-        auctions,
-        bids,
-        orders,
-        history,
-        danmakuMessages,
-        danmakuBlockedUsers
-      },
-      null,
-      2
-    )
-  );
+  writeFileSync(DATA_FILE, JSON.stringify(state, null, 2));
+
+  if (mysqlPersistenceReady && !mysqlPersistenceDisabled) {
+    void saveMysqlState(state);
+  }
 }
 
 function loadState() {
+  if (isMysqlPersistenceConfigured()) {
+    void loadMysqlState()
+      .then((data) => {
+        mysqlPersistenceReady = true;
+
+        if (data) {
+          applyPersistedState(data);
+          ensureDemoWebAccounts();
+          ensureDemoLiveRoomOwnership();
+          ensureLocalDemoProductImages();
+          rebuildProcessedBidRequestIds();
+          saveState();
+        } else {
+          saveState();
+        }
+      })
+      .catch((error) => {
+        mysqlPersistenceDisabled = true;
+        console.warn(`MySQL 持久化不可用，已回落本地 JSON：${error instanceof Error ? error.message : "未知错误"}`);
+      });
+  }
+
   try {
-    const data = JSON.parse(readFileSync(DATA_FILE, "utf8")) as {
-      liveRooms?: LiveRoom[];
-      users?: User[];
-      sessions?: Session[];
-      products?: Product[];
-      auctions?: Auction[];
-      bids?: Bid[];
-      orders?: Order[];
-      history?: AuctionHistoryItem[];
-      danmakuMessages?: DanmakuMessage[];
-      danmakuBlockedUsers?: DanmakuBlockedUser[];
+    applyPersistedState(JSON.parse(readFileSync(DATA_FILE, "utf8")) as Partial<PersistedAuctionState> & {
       auction?: Partial<Auction>;
       order?: Order | null;
-    };
-
-    if (Array.isArray(data.products)) {
-      mergeById(products, data.products);
-    }
-
-    if (Array.isArray(data.liveRooms)) {
-      mergeById(liveRooms, data.liveRooms);
-    }
-
-    if (Array.isArray(data.users)) {
-      mergeById(users, data.users);
-    }
-
-    if (Array.isArray(data.sessions)) {
-      sessions.splice(0, sessions.length, ...data.sessions.filter((session) => session.expiresAt > Date.now()));
-    }
-
-    if (Array.isArray(data.auctions)) {
-      mergeById(auctions, data.auctions);
-    } else if (data.auction) {
-      const currentAuction = requireAuction("auction-1");
-      Object.assign(currentAuction, data.auction);
-    }
-
-    if (Array.isArray(data.bids)) {
-      bids.splice(0, bids.length, ...data.bids);
-    }
-
-    if (Array.isArray(data.orders)) {
-      orders.splice(0, orders.length, ...data.orders);
-    } else if (data.order) {
-      orders.splice(0, orders.length, data.order);
-    }
-
-    if (Array.isArray(data.history)) {
-      history.splice(0, history.length, ...data.history.slice(0, 20));
-    }
-
-    if (Array.isArray(data.danmakuMessages)) {
-      danmakuMessages.splice(0, danmakuMessages.length, ...data.danmakuMessages);
-      for (const liveRoom of liveRooms) {
-        trimDanmakuMessages(liveRoom.id);
-      }
-    }
-
-    if (Array.isArray(data.danmakuBlockedUsers)) {
-      danmakuBlockedUsers.splice(0, danmakuBlockedUsers.length, ...data.danmakuBlockedUsers);
-    }
+    });
   } catch {
     // Missing or invalid state file falls back to the seeded demo data.
+  }
+}
+
+function getPersistedState(): PersistedAuctionState {
+  return {
+    liveRooms,
+    users,
+    sessions,
+    products,
+    auctions,
+    bids,
+    orders,
+    history,
+    danmakuMessages,
+    danmakuBlockedUsers
+  };
+}
+
+function applyPersistedState(data: Partial<PersistedAuctionState> & { auction?: Partial<Auction>; order?: Order | null }) {
+  if (Array.isArray(data.products)) {
+    mergeById(products, data.products);
+  }
+
+  if (Array.isArray(data.liveRooms)) {
+    mergeById(liveRooms, data.liveRooms);
+  }
+
+  if (Array.isArray(data.users)) {
+    mergeById(users, data.users);
+  }
+
+  if (Array.isArray(data.sessions)) {
+    sessions.splice(0, sessions.length, ...data.sessions.filter((session) => session.expiresAt > Date.now()));
+  }
+
+  if (Array.isArray(data.auctions)) {
+    mergeById(auctions, data.auctions);
+  } else if (data.auction) {
+    const currentAuction = requireAuction("auction-1");
+    Object.assign(currentAuction, data.auction);
+  }
+
+  if (Array.isArray(data.bids)) {
+    bids.splice(0, bids.length, ...data.bids);
+  }
+
+  if (Array.isArray(data.orders)) {
+    orders.splice(0, orders.length, ...data.orders);
+  } else if (data.order) {
+    orders.splice(0, orders.length, data.order);
+  }
+
+  if (Array.isArray(data.history)) {
+    history.splice(0, history.length, ...data.history.slice(0, 20));
+  }
+
+  if (Array.isArray(data.danmakuMessages)) {
+    danmakuMessages.splice(0, danmakuMessages.length, ...data.danmakuMessages);
+    for (const liveRoom of liveRooms) {
+      trimDanmakuMessages(liveRoom.id);
+    }
+  }
+
+  if (Array.isArray(data.danmakuBlockedUsers)) {
+    danmakuBlockedUsers.splice(0, danmakuBlockedUsers.length, ...data.danmakuBlockedUsers);
   }
 }
 
