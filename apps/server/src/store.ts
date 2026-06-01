@@ -1138,6 +1138,36 @@ export async function generateAuctionSummary(liveRoomId = DEFAULT_LIVE_ROOM_ID) 
   });
 }
 
+export async function generateHostCue(liveRoomId = DEFAULT_LIVE_ROOM_ID) {
+  const liveRoom = requireLiveRoom(liveRoomId);
+  const auction = requireAuctionForLiveRoom(liveRoomId);
+  const product = requireProduct(auction.productId);
+  const auctionBids = getAuctionBids(auction.id);
+  const recentDanmaku = getDanmakuMessages(liveRoomId)
+    .slice(0, 5)
+    .map((item) => `${item.nickname}：${item.content}`);
+  const lastBid = auctionBids[0];
+  const nextBid = auction.currentPrice + auction.incrementStep;
+  const statusText = {
+    PENDING: "待开始",
+    ACTIVE: "竞拍中",
+    SOLD: "已成交",
+    UNSOLD: "已流拍",
+    CANCELLED: "已取消"
+  } satisfies Record<typeof auction.status, string>;
+  const fallbackContent =
+    auction.status === "ACTIVE"
+      ? `${liveRoom.hostName}可以这样说：正在关注${product.name}的朋友别错过，目前最高价 ${auction.currentPrice} 元，下一口 ${nextBid} 元起。${lastBid ? `刚刚 ${lastBid.nickname} 出到了 ${lastBid.price} 元，` : ""}还有疑问可以直接发弹幕，我会结合细节继续讲。`
+      : `${liveRoom.hostName}可以这样说：这件${product.name}已经准备好，起拍价 ${auction.startPrice} 元，每次最低加价 ${auction.incrementStep} 元。想看细节或使用场景的朋友可以先发弹幕，马上开始竞拍。`;
+
+  return completeWithModel({
+    title: "AI 主播实时话术",
+    systemPrompt: "你是直播电商主播场控助手，只输出一段主播可以直接念的自然话术，合规、简短，不制造虚假紧迫感。",
+    userPrompt: `请生成 90 字以内主播实时话术。\n直播间：${liveRoom.title}\n主播：${liveRoom.hostName}\n商品：${product.name}\n商品描述：${product.description}\n竞拍状态：${statusText[auction.status]}\n当前价：${auction.currentPrice}\n下一口价：${nextBid}\n封顶价：${auction.ceilingPrice}\n参与人数：${getParticipantCount(auction.id)}\n最近出价：${lastBid ? `${lastBid.nickname} ${lastBid.price} 元` : "暂无"}\n最近弹幕：${recentDanmaku.length ? recentDanmaku.join("；") : "暂无"}`,
+    fallbackContent
+  });
+}
+
 export async function detectBidRisk(input: { liveRoomId?: string; userId: string; price: number }) {
   const liveRoomId = input.liveRoomId ?? DEFAULT_LIVE_ROOM_ID;
   const auction = requireAuctionForLiveRoom(liveRoomId);

@@ -121,7 +121,7 @@ type PayOrderResponse =
       snapshot: AuctionSnapshot;
     };
 
-type AiTask = "script" | "summary" | "risk";
+type AiTask = "script" | "summary" | "cue" | "risk";
 type ViewMode = "host" | "buyer";
 type AppRoute = {
   viewMode: ViewMode;
@@ -134,6 +134,7 @@ type AppRoute = {
 const aiTaskText: Record<AiTask, string> = {
   script: "讲解词",
   summary: "竞拍复盘",
+  cue: "主播话术",
   risk: "风险提示"
 };
 
@@ -874,7 +875,9 @@ export function App() {
           ? "/api/ai/product-script"
           : type === "summary"
             ? "/api/ai/auction-summary"
-            : "/api/ai/bid-risk";
+            : type === "cue"
+              ? "/api/ai/host-cue"
+              : "/api/ai/bid-risk";
       const init =
         type === "risk"
           ? {
@@ -1912,6 +1915,10 @@ export function App() {
                   <BarChart3 size={16} />
                   <span>{aiTask === "summary" ? "生成中" : "竞拍复盘"}</span>
                 </button>
+                <button disabled={aiLoading} onClick={() => runAiTask("cue")}>
+                  <Radio size={16} />
+                  <span>{aiTask === "cue" ? "生成中" : "主播话术"}</span>
+                </button>
                 <button disabled={aiLoading} onClick={() => runAiTask("risk")}>
                   <ShieldAlert size={16} />
                   <span>{aiTask === "risk" ? "生成中" : "风险提示"}</span>
@@ -1947,7 +1954,7 @@ export function App() {
               ) : (
                 <div className="ai-empty">
                   <Sparkles size={18} />
-                  <p>可生成商品讲解词、竞拍复盘或异常出价提示。</p>
+                  <p>可生成商品讲解词、竞拍复盘、主播话术或异常出价提示。</p>
                 </div>
               )}
             </section>

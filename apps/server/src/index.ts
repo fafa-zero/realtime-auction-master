@@ -14,6 +14,7 @@ import {
   detectBidRisk,
   getAuctionHistory,
   generateAuctionSummary,
+  generateHostCue,
   generateProductScript,
   getAuction,
   getBidCount,
@@ -738,6 +739,16 @@ app.post("/api/ai/auction-summary", async (req, res) => {
     requireHostUser(req);
     const liveRoomId = getLiveRoomIdFromRequest(req.body);
     res.json(await generateAuctionSummary(liveRoomId));
+  } catch (error) {
+    res.status(getErrorStatus(error)).json(createAiErrorResponse(getErrorMessage(error)));
+  }
+});
+
+app.post("/api/ai/host-cue", async (req, res) => {
+  try {
+    requireHostUser(req);
+    const liveRoomId = getLiveRoomIdFromRequest(req.body);
+    res.json(await generateHostCue(liveRoomId));
   } catch (error) {
     res.status(getErrorStatus(error)).json(createAiErrorResponse(getErrorMessage(error)));
   }

@@ -20,7 +20,7 @@
 - 达到封顶价自动成交，并生成模拟订单。
 - Web Socket.IO 实时同步竞拍和弹幕；小程序通过 `/miniprogram-ws` 实时同步，REST 轮询与 HTTP 提交接口作为兜底。
 - 弹幕支持发送、历史列表、飞屏展示、限频、敏感词过滤、主播撤回和屏蔽用户。
-- AI 助手支持商品讲解词、竞拍复盘和异常出价提示；未配置模型时有本地兜底结果。
+- AI 助手支持商品讲解词、竞拍复盘、主播实时话术和异常出价提示；未配置模型时有本地兜底结果。
 - 本地 JSON 持久化，重启后保留用户、会话、直播间、竞拍、订单和弹幕。
 
 ## 技术栈
@@ -245,6 +245,7 @@ DATABASE_URL=mysql://root:your_password@127.0.0.1:3306/realtime_auction
 - `POST /api/live-rooms/:liveRoomId/products/:productId/start`：从队列选择商品开拍。
 - `POST /api/ai/product-script`：生成商品讲解词。
 - `POST /api/ai/auction-summary`：生成竞拍复盘。
+- `POST /api/ai/host-cue`：生成主播实时话术。
 - `POST /api/ai/bid-risk`：生成异常出价提示。
 
 弹幕：
