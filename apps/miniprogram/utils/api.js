@@ -175,6 +175,12 @@ function loginBuyer(input = {}) {
   });
 }
 
+function logoutBuyer() {
+  return request("/api/auth/logout", {
+    method: "POST"
+  });
+}
+
 function getMe() {
   return request("/api/me");
 }
@@ -232,6 +238,7 @@ module.exports = {
   getMiniprogramWsUrl,
   getMyOrders,
   loginBuyer,
+  logoutBuyer,
   payOrder,
   placeBid,
   registerBuyer,

@@ -2,7 +2,7 @@ import http from "node:http";
 import path from "node:path";
 import cors from "cors";
 import express from "express";
-import { Server } from "socket.io";
+import { Server, type Socket } from "socket.io";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import { z } from "zod";
 import {
@@ -12,10 +12,12 @@ import {
   createAuctionProduct,
   createLiveRoom,
   detectBidRisk,
+  flushPersistence,
   getAuctionHistory,
   generateAuctionSummary,
   generateHostCue,
   generateProductScript,
+  getAuditLogs,
   getAuction,
   getBidCount,
   getSnapshot,
@@ -30,11 +32,14 @@ import {
   getProductQueue,
   getUserByAccount,
   getUserByToken,
+  initializePersistence,
   importAuctionProducts,
   loginMiniprogram,
   loginWebUser,
+  logoutSession,
   payOrder,
   placeBid,
+  recordAuditLog,
   registerMiniprogram,
   registerWebUser,
   reorderAuctionProducts,
@@ -56,10 +61,24 @@ const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5174";
 const CLIENT_ORIGINS = getLocalClientOrigins(CLIENT_URL);
 const DEFAULT_LIVE_ROOM_ID = "live-1";
 const WEB_DIST_DIR = path.resolve(process.cwd(), "../web/dist");
+const MIN_PASSWORD_LENGTH = 6;
+const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES ?? 2 * 1024 * 1024);
+const LOGIN_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
+const LOGIN_RATE_LIMIT_MAX_FAILURES = 5;
+const HOST_INVITE_CODE = process.env.HOST_INVITE_CODE?.trim() ?? "";
+const loginFailures = new Map<string, { count: number; firstFailedAt: number }>();
+
+type AuthenticatedUser = {
+  id: string;
+  account?: string;
+  nickname: string;
+  role: "BUYER" | "HOST" | "ADMIN";
+};
 
 const app = express();
 app.use(cors({ origin: CLIENT_ORIGINS }));
 app.use(express.json());
+app.use(waitForPersistenceBeforeMutationResponse);
 app.use("/static", express.static(path.resolve(process.cwd(), "public")));
 app.use(express.static(WEB_DIST_DIR));
 
@@ -90,6 +109,100 @@ function getLocalClientOrigins(clientUrl: string) {
   }
 
   return Array.from(origins);
+}
+
+function waitForPersistenceBeforeMutationResponse(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) {
+  if (!["POST", "PATCH", "DELETE"].includes(req.method)) {
+    next();
+    return;
+  }
+
+  const originalJson = res.json.bind(res) as (body?: unknown) => express.Response;
+
+  res.json = ((body?: unknown) => {
+    void flushPersistence().finally(() => {
+      originalJson(body);
+    });
+
+    return res;
+  }) as typeof res.json;
+
+  next();
+}
+
+function assertHostInviteCode(hostInviteCode?: string) {
+  if (!HOST_INVITE_CODE || hostInviteCode?.trim() !== HOST_INVITE_CODE) {
+    throw new Error("主播注册需要有效邀请码");
+  }
+}
+
+function getLoginRateLimitKey(req: express.Request, account: string) {
+  return `${req.ip ?? "unknown"}:${account.trim().toLowerCase()}`;
+}
+
+function assertLoginAllowed(req: express.Request, account: string) {
+  const key = getLoginRateLimitKey(req, account);
+  const entry = loginFailures.get(key);
+
+  if (!entry) {
+    return;
+  }
+
+  if (Date.now() - entry.firstFailedAt > LOGIN_RATE_LIMIT_WINDOW_MS) {
+    loginFailures.delete(key);
+    return;
+  }
+
+  if (entry.count >= LOGIN_RATE_LIMIT_MAX_FAILURES) {
+    throw new Error("登录尝试过多，请稍后再试");
+  }
+}
+
+function recordLoginFailure(req: express.Request, account: string) {
+  const key = getLoginRateLimitKey(req, account);
+  const now = Date.now();
+  const entry = loginFailures.get(key);
+
+  if (!entry || now - entry.firstFailedAt > LOGIN_RATE_LIMIT_WINDOW_MS) {
+    loginFailures.set(key, { count: 1, firstFailedAt: now });
+    return;
+  }
+
+  entry.count += 1;
+}
+
+function clearLoginFailures(req: express.Request, account: string) {
+  loginFailures.delete(getLoginRateLimitKey(req, account));
+}
+
+function writeAuditLog(
+  user: AuthenticatedUser,
+  action: string,
+  options: { liveRoomId?: string; targetId?: string; detail?: Record<string, unknown> } = {}
+) {
+  recordAuditLog({
+    userId: user.id,
+    userNickname: user.nickname,
+    role: user.role,
+    action,
+    liveRoomId: options.liveRoomId,
+    targetId: options.targetId,
+    detail: options.detail
+  });
+}
+
+function writeAnonymousAuditLog(action: string, detail?: Record<string, unknown>) {
+  recordAuditLog({
+    userId: "anonymous",
+    userNickname: "匿名用户",
+    role: "ANONYMOUS",
+    action,
+    detail
+  });
 }
 
 app.get("/api/health", (_req, res) => {
@@ -193,7 +306,7 @@ app.post("/api/auth/miniprogram/register", async (req, res) => {
     const user = registerMiniprogram({ ...input, openId: login.openId });
     res.json({ ok: true, user });
   } catch (error) {
-    res.status(400).json({ ok: false, message: getErrorMessage(error) });
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
   }
 });
 
@@ -201,15 +314,30 @@ app.post("/api/auth/web/register", (req, res) => {
   try {
     const schema = z.object({
       account: z.string().min(1, "账号不能为空").max(80, "账号不能超过 80 个字符"),
-      password: z.string().min(1, "密码不能为空").max(80, "密码不能超过 80 个字符"),
+      password: z
+        .string()
+        .min(MIN_PASSWORD_LENGTH, `密码不能少于 ${MIN_PASSWORD_LENGTH} 个字符`)
+        .max(80, "密码不能超过 80 个字符"),
       nickname: z.string().min(1).max(40).optional(),
-      role: z.enum(["BUYER", "HOST", "ADMIN"]).optional()
+      role: z.enum(["BUYER", "HOST"]).optional(),
+      hostInviteCode: z.string().max(80).optional()
     });
     const input = schema.parse(req.body ?? {});
-    const user = registerWebUser(input);
+    const role = input.role ?? "HOST";
+
+    if (role === "HOST") {
+      assertHostInviteCode(input.hostInviteCode);
+    }
+
+    const user = registerWebUser({
+      account: input.account,
+      password: input.password,
+      nickname: input.nickname,
+      role
+    });
     res.json({ ok: true, user });
   } catch (error) {
-    res.status(400).json({ ok: false, message: getErrorMessage(error) });
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
   }
 });
 
@@ -220,10 +348,35 @@ app.post("/api/auth/web/login", (req, res) => {
       password: z.string().min(1, "密码不能为空").max(80, "密码不能超过 80 个字符")
     });
     const input = schema.parse(req.body ?? {});
+    assertLoginAllowed(req, input.account);
     const result = loginWebUser(input);
+    clearLoginFailures(req, input.account);
     res.json({ ok: true, ...result });
   } catch (error) {
-    res.status(401).json({ ok: false, message: getErrorMessage(error) });
+    const status = getErrorMessage(error).includes("登录尝试过多") ? 429 : 401;
+    const input = z.object({ account: z.string().optional() }).safeParse(req.body ?? {});
+
+    if (status !== 429 && input.success && input.data.account) {
+      recordLoginFailure(req, input.data.account);
+    }
+
+    if (status === 429 && input.success && input.data.account) {
+      writeAnonymousAuditLog("LOGIN_RATE_LIMITED", {
+        account: input.data.account,
+        ip: req.ip ?? "unknown"
+      });
+    }
+
+    res.status(status).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
+app.post("/api/auth/logout", (req, res) => {
+  try {
+    const token = getAuthToken(req);
+    res.json(logoutSession(token));
+  } catch (error) {
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
   }
 });
 
@@ -246,14 +399,18 @@ app.patch("/api/me/profile", (req, res) => {
     const user = updateUserProfileByToken(getAuthToken(req), input);
     res.json({ ok: true, user });
   } catch (error) {
-    res.status(400).json({ ok: false, message: getErrorMessage(error) });
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
   }
 });
 
 app.post("/api/admin/reset-demo", (req, res) => {
   try {
-    requireHostUser(req);
+    const user = requireDemoResetUser(req);
     const result = resetDemoState();
+    writeAuditLog(user, "DEMO_RESET", {
+      liveRoomId: DEFAULT_LIVE_ROOM_ID,
+      detail: { roomCount: result.rooms.length }
+    });
 
     for (const snapshot of result.snapshots) {
       broadcastAuctionEvent(snapshot.auction.liveRoomId, "auction:snapshot", snapshot);
@@ -326,6 +483,11 @@ app.post("/api/live-rooms", (req, res) => {
       ownerUserId: user.id,
       ...input
     });
+    writeAuditLog(user, "LIVE_ROOM_CREATE", {
+      liveRoomId: result.room.id,
+      targetId: result.room.id,
+      detail: { title: result.room.title }
+    });
     res.json({ ok: true, ...result });
   } catch (error) {
     res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
@@ -347,7 +509,7 @@ app.get("/api/live-rooms/:liveRoomId", (req, res) => {
       room: getLiveRoom(req.params.liveRoomId)
     });
   } catch (error) {
-    res.status(404).json({ ok: false, message: getErrorMessage(error) });
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
   }
 });
 
@@ -375,9 +537,14 @@ app.get("/api/live-rooms/:liveRoomId/products", (req, res) => {
 app.post("/api/live-rooms/:liveRoomId/products", (req, res) => {
   try {
     assertLiveRoom(req.params.liveRoomId);
-    requireHostUser(req);
+    const user = requireRoomHostUser(req, req.params.liveRoomId);
     const input = productManageSchema.parse(req.body ?? {});
-    res.json(createAuctionProduct(req.params.liveRoomId, input));
+    const result = createAuctionProduct(req.params.liveRoomId, input);
+    writeAuditLog(user, "PRODUCT_CREATE", {
+      liveRoomId: req.params.liveRoomId,
+      detail: { name: input.name }
+    });
+    res.json(result);
   } catch (error) {
     res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
   }
@@ -386,9 +553,15 @@ app.post("/api/live-rooms/:liveRoomId/products", (req, res) => {
 app.patch("/api/live-rooms/:liveRoomId/products/:productId", (req, res) => {
   try {
     assertLiveRoom(req.params.liveRoomId);
-    requireHostUser(req);
+    const user = requireRoomHostUser(req, req.params.liveRoomId);
     const input = productManageSchema.partial().parse(req.body ?? {});
-    res.json(updateAuctionProduct(req.params.liveRoomId, req.params.productId, input));
+    const result = updateAuctionProduct(req.params.liveRoomId, req.params.productId, input);
+    writeAuditLog(user, "PRODUCT_UPDATE", {
+      liveRoomId: req.params.liveRoomId,
+      targetId: req.params.productId,
+      detail: { fields: Object.keys(input) }
+    });
+    res.json(result);
   } catch (error) {
     res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
   }
@@ -397,8 +570,13 @@ app.patch("/api/live-rooms/:liveRoomId/products/:productId", (req, res) => {
 app.delete("/api/live-rooms/:liveRoomId/products/:productId", (req, res) => {
   try {
     assertLiveRoom(req.params.liveRoomId);
-    requireHostUser(req);
-    res.json(archiveAuctionProduct(req.params.liveRoomId, req.params.productId));
+    const user = requireRoomHostUser(req, req.params.liveRoomId);
+    const result = archiveAuctionProduct(req.params.liveRoomId, req.params.productId);
+    writeAuditLog(user, "PRODUCT_ARCHIVE", {
+      liveRoomId: req.params.liveRoomId,
+      targetId: req.params.productId
+    });
+    res.json(result);
   } catch (error) {
     res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
   }
@@ -407,12 +585,17 @@ app.delete("/api/live-rooms/:liveRoomId/products/:productId", (req, res) => {
 app.post("/api/live-rooms/:liveRoomId/products/reorder", (req, res) => {
   try {
     assertLiveRoom(req.params.liveRoomId);
-    requireHostUser(req);
+    const user = requireRoomHostUser(req, req.params.liveRoomId);
     const schema = z.object({
       productIds: z.array(z.string().min(1)).min(1)
     });
     const input = schema.parse(req.body ?? {});
-    res.json(reorderAuctionProducts(req.params.liveRoomId, input.productIds));
+    const result = reorderAuctionProducts(req.params.liveRoomId, input.productIds);
+    writeAuditLog(user, "PRODUCT_REORDER", {
+      liveRoomId: req.params.liveRoomId,
+      detail: { count: input.productIds.length }
+    });
+    res.json(result);
   } catch (error) {
     res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
   }
@@ -433,7 +616,7 @@ app.get("/api/live-rooms/:liveRoomId/danmaku", (req, res) => {
 app.post("/api/live-rooms/:liveRoomId/danmaku", (req, res) => {
   try {
     assertLiveRoom(req.params.liveRoomId);
-    const authUser = getOptionalAuthUser(req);
+    const authUser = getUserByToken(getAuthToken(req));
     const input = parseDanmakuInput(req.body, authUser);
     const message = sendDanmakuMessage({
       liveRoomId: req.params.liveRoomId,
@@ -443,14 +626,14 @@ app.post("/api/live-rooms/:liveRoomId/danmaku", (req, res) => {
     broadcastAuctionEvent(req.params.liveRoomId, "danmaku:new", message);
     res.json({ ok: true, message });
   } catch (error) {
-    res.status(400).json({ ok: false, message: getErrorMessage(error) });
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
   }
 });
 
 app.get("/api/live-rooms/:liveRoomId/danmaku/blocked-users", (req, res) => {
   try {
     assertLiveRoom(req.params.liveRoomId);
-    requireHostUser(req);
+    requireRoomHostUser(req, req.params.liveRoomId);
     res.json({
       ok: true,
       items: getDanmakuBlockedUsers(req.params.liveRoomId)
@@ -463,7 +646,7 @@ app.get("/api/live-rooms/:liveRoomId/danmaku/blocked-users", (req, res) => {
 app.post("/api/live-rooms/:liveRoomId/danmaku/:messageId/retract", (req, res) => {
   try {
     assertLiveRoom(req.params.liveRoomId);
-    const moderator = requireHostUser(req);
+    const moderator = requireRoomHostUser(req, req.params.liveRoomId);
     const schema = z.object({
       reason: z.string().max(80).optional()
     });
@@ -473,6 +656,11 @@ app.post("/api/live-rooms/:liveRoomId/danmaku/:messageId/retract", (req, res) =>
       messageId: req.params.messageId,
       moderatorUserId: moderator.id,
       reason: input.reason
+    });
+    writeAuditLog(moderator, "DANMAKU_RETRACT", {
+      liveRoomId: req.params.liveRoomId,
+      targetId: req.params.messageId,
+      detail: { reason: message.retractionReason }
     });
 
     broadcastAuctionEvent(req.params.liveRoomId, "danmaku:retracted", message);
@@ -485,7 +673,7 @@ app.post("/api/live-rooms/:liveRoomId/danmaku/:messageId/retract", (req, res) =>
 app.post("/api/live-rooms/:liveRoomId/danmaku/block-user", (req, res) => {
   try {
     assertLiveRoom(req.params.liveRoomId);
-    const moderator = requireHostUser(req);
+    const moderator = requireRoomHostUser(req, req.params.liveRoomId);
     const schema = z.object({
       userId: z.string().min(1),
       nickname: z.string().min(1).max(40),
@@ -499,6 +687,11 @@ app.post("/api/live-rooms/:liveRoomId/danmaku/block-user", (req, res) => {
       moderatorUserId: moderator.id,
       reason: input.reason
     });
+    writeAuditLog(moderator, "DANMAKU_BLOCK_USER", {
+      liveRoomId: req.params.liveRoomId,
+      targetId: input.userId,
+      detail: { nickname: input.nickname, reason: blockedUser.reason }
+    });
 
     broadcastAuctionEvent(req.params.liveRoomId, "danmaku:user-blocked", blockedUser);
     res.json({ ok: true, blockedUser });
@@ -510,11 +703,18 @@ app.post("/api/live-rooms/:liveRoomId/danmaku/block-user", (req, res) => {
 app.post("/api/live-rooms/:liveRoomId/products/import", async (req, res) => {
   try {
     assertLiveRoom(req.params.liveRoomId);
-    requireHostUser(req);
+    const user = requireRoomHostUser(req, req.params.liveRoomId);
     const records = Array.isArray(req.body?.rows)
       ? (req.body.rows as SpreadsheetRecord[])
       : parseSpreadsheetFromUpload(await readUpload(req), req.headers["content-type"]);
     const result = importAuctionProducts(req.params.liveRoomId, records.map(recordToProductImportRow));
+    writeAuditLog(user, "PRODUCT_IMPORT", {
+      liveRoomId: req.params.liveRoomId,
+      detail: {
+        importedCount: result.importedCount,
+        failedRows: result.failedRows.length
+      }
+    });
     res.json(result);
   } catch (error) {
     res.status(400).json({ ok: false, message: getErrorMessage(error) });
@@ -524,8 +724,13 @@ app.post("/api/live-rooms/:liveRoomId/products/import", async (req, res) => {
 app.post("/api/live-rooms/:liveRoomId/products/:productId/start", (req, res) => {
   try {
     assertLiveRoom(req.params.liveRoomId);
-    requireHostUser(req);
+    const user = requireRoomHostUser(req, req.params.liveRoomId);
     const snapshot = startProductAuction(req.params.liveRoomId, req.params.productId);
+    writeAuditLog(user, "PRODUCT_START_AUCTION", {
+      liveRoomId: req.params.liveRoomId,
+      targetId: req.params.productId,
+      detail: { productName: snapshot.product.name }
+    });
     broadcastAuctionEvent(req.params.liveRoomId, "auction:started", snapshot);
     res.json(snapshot);
   } catch (error) {
@@ -536,38 +741,63 @@ app.post("/api/live-rooms/:liveRoomId/products/:productId/start", (req, res) => 
 app.post("/api/live-rooms/:liveRoomId/products/:productId/ai-script", async (req, res) => {
   try {
     assertLiveRoom(req.params.liveRoomId);
-    requireHostUser(req);
+    requireRoomHostUser(req, req.params.liveRoomId);
     res.json(await generateProductScript(req.params.liveRoomId, req.params.productId));
   } catch (error) {
-    res.status(400).json(createAiErrorResponse(getErrorMessage(error)));
+    res.status(getErrorStatus(error)).json(createAiErrorResponse(getErrorMessage(error)));
   }
 });
 
-app.get("/api/auction/history", (_req, res) => {
-  res.json({
-    ok: true,
-    items: getAuctionHistory()
-  });
+app.get("/api/auction/history", (req, res) => {
+  try {
+    const user = requireHostUser(req);
+    const items =
+      user.role === "ADMIN"
+        ? getAuctionHistory()
+        : getLiveRoomsForHost(user.id).flatMap((room) => getAuctionHistory(room.id));
+
+    res.json({
+      ok: true,
+      items
+    });
+  } catch (error) {
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
+  }
 });
 
 app.get("/api/live-rooms/:liveRoomId/auction/history", (req, res) => {
   try {
     assertLiveRoom(req.params.liveRoomId);
+    const user = getUserByToken(getAuthToken(req));
+
+    if (user.role === "BUYER") {
+      res.json({
+        ok: true,
+        items: getBuyerAuctionHistory(req.params.liveRoomId, user.id)
+      });
+      return;
+    }
+
+    requireRoomHostUser(req, req.params.liveRoomId);
     res.json({
       ok: true,
       items: getAuctionHistory(req.params.liveRoomId)
     });
   } catch (error) {
-    res.status(404).json({ ok: false, message: getErrorMessage(error) });
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
   }
 });
 
 app.get("/api/orders", (_req, res) => {
   try {
-    requireHostUser(_req);
+    const user = requireHostUser(_req);
+    const items =
+      user.role === "ADMIN"
+        ? getOrders()
+        : getLiveRoomsForHost(user.id).flatMap((room) => getOrders(room.id));
     res.json({
       ok: true,
-      items: getOrders()
+      items
     });
   } catch (error) {
     res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
@@ -577,13 +807,26 @@ app.get("/api/orders", (_req, res) => {
 app.get("/api/live-rooms/:liveRoomId/orders", (req, res) => {
   try {
     assertLiveRoom(req.params.liveRoomId);
-    requireHostUser(req);
+    requireRoomHostUser(req, req.params.liveRoomId);
     res.json({
       ok: true,
       items: getOrders(req.params.liveRoomId)
     });
   } catch (error) {
     res.status(404).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
+app.get("/api/live-rooms/:liveRoomId/audit-logs", (req, res) => {
+  try {
+    assertLiveRoom(req.params.liveRoomId);
+    requireRoomHostUser(req, req.params.liveRoomId);
+    res.json({
+      ok: true,
+      items: getAuditLogs(req.params.liveRoomId, 20)
+    });
+  } catch (error) {
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
   }
 });
 
@@ -598,7 +841,7 @@ app.post("/api/live-rooms/:liveRoomId/auction/start", (req, res) => {
 function handleStartAuction(req: express.Request, liveRoomId: string, res: express.Response) {
   try {
     assertLiveRoom(liveRoomId);
-    requireHostUser(req);
+    const user = requireRoomHostUser(req, liveRoomId);
     const schema = z.object({
       durationSeconds: z
         .number({ invalid_type_error: "专场时长必须是数字" })
@@ -621,6 +864,15 @@ function handleStartAuction(req: express.Request, liveRoomId: string, res: expre
     });
     const input = schema.parse(req.body ?? {});
     const snapshot = startAuction(liveRoomId, input);
+    writeAuditLog(user, "AUCTION_START", {
+      liveRoomId,
+      targetId: snapshot.auction.id,
+      detail: {
+        durationSeconds: snapshot.auction.durationSeconds,
+        incrementStep: snapshot.auction.incrementStep,
+        ceilingPrice: snapshot.auction.ceilingPrice
+      }
+    });
     broadcastAuctionEvent(liveRoomId, "auction:started", snapshot);
     res.json(snapshot);
   } catch (error) {
@@ -639,12 +891,17 @@ app.post("/api/live-rooms/:liveRoomId/auction/cancel", (req, res) => {
 function handleCancelAuction(req: express.Request, liveRoomId: string, res: express.Response) {
   try {
     assertLiveRoom(liveRoomId);
-    requireHostUser(req);
+    const user = requireRoomHostUser(req, liveRoomId);
     const schema = z.object({
       reason: z.string().min(1).optional()
     });
     const input = schema.parse(req.body ?? {});
     const result = cancelAuction(liveRoomId, input.reason);
+    writeAuditLog(user, "AUCTION_CANCEL", {
+      liveRoomId,
+      targetId: result.snapshot.auction.id,
+      detail: { reason: input.reason ?? result.reason }
+    });
     broadcastAuctionEvent(liveRoomId, "auction:cancelled", result);
     res.json(result.snapshot);
   } catch (error) {
@@ -663,7 +920,7 @@ app.post("/api/live-rooms/:liveRoomId/auction/bids", (req, res) => {
 function handlePlaceBid(body: unknown, liveRoomId: string, res: express.Response) {
   try {
     assertLiveRoom(liveRoomId);
-    const authUser = getOptionalAuthUser(res.req);
+    const authUser = getUserByToken(getAuthToken(res.req));
     const schema = z.object({
       userId: z.string().min(1, "用户 ID 不能为空").optional(),
       nickname: z.string().min(1, "昵称不能为空").optional(),
@@ -671,8 +928,17 @@ function handlePlaceBid(body: unknown, liveRoomId: string, res: express.Response
       clientRequestId: z.string().min(1, "请求 ID 不能为空")
     });
     const input = schema.parse(body);
-    const bidder = resolveBidder(input, authUser);
+    const bidder = resolveBidder(authUser);
     const result = placeBid({ ...input, ...bidder, liveRoomId });
+    writeAuditLog(authUser, "BID_PLACE", {
+      liveRoomId,
+      targetId: result.bid.id,
+      detail: {
+        price: result.bid.price,
+        duplicate: result.duplicate,
+        settled: result.settled
+      }
+    });
 
     broadcastAuctionEvent(liveRoomId, "auction:bid-success", result.snapshot);
 
@@ -694,7 +960,7 @@ function handlePlaceBid(body: unknown, liveRoomId: string, res: express.Response
       snapshot: result.snapshot
     });
   } catch (error) {
-    res.status(400).json({ ok: false, message: getErrorMessage(error) });
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
   }
 }
 
@@ -711,6 +977,11 @@ app.post("/api/orders/:orderId/pay", (req, res) => {
     const paidOrder = payOrder(req.params.orderId);
     const liveRoom = getLiveRooms().find((room) => room.currentAuctionId === paidOrder.auctionId);
     const snapshot = getSnapshot(liveRoom?.id ?? DEFAULT_LIVE_ROOM_ID);
+    writeAuditLog(authUser, "ORDER_PAY", {
+      liveRoomId: snapshot.auction.liveRoomId,
+      targetId: paidOrder.id,
+      detail: { finalPrice: paidOrder.finalPrice }
+    });
     broadcastAuctionEvent(snapshot.auction.liveRoomId, "order:paid", snapshot);
     res.json({
       ...paidOrder,
@@ -725,8 +996,8 @@ app.post("/api/orders/:orderId/pay", (req, res) => {
 
 app.post("/api/ai/product-script", async (req, res) => {
   try {
-    requireHostUser(req);
-    const liveRoomId = getLiveRoomIdFromRequest(req.body);
+    const liveRoomId = getLiveRoomIdFromRequest(req.body) ?? DEFAULT_LIVE_ROOM_ID;
+    requireRoomHostUser(req, liveRoomId);
     const productId = getProductIdFromRequest(req.body);
     res.json(await generateProductScript(liveRoomId, productId));
   } catch (error) {
@@ -736,8 +1007,8 @@ app.post("/api/ai/product-script", async (req, res) => {
 
 app.post("/api/ai/auction-summary", async (req, res) => {
   try {
-    requireHostUser(req);
-    const liveRoomId = getLiveRoomIdFromRequest(req.body);
+    const liveRoomId = getLiveRoomIdFromRequest(req.body) ?? DEFAULT_LIVE_ROOM_ID;
+    requireRoomHostUser(req, liveRoomId);
     res.json(await generateAuctionSummary(liveRoomId));
   } catch (error) {
     res.status(getErrorStatus(error)).json(createAiErrorResponse(getErrorMessage(error)));
@@ -746,8 +1017,8 @@ app.post("/api/ai/auction-summary", async (req, res) => {
 
 app.post("/api/ai/host-cue", async (req, res) => {
   try {
-    requireHostUser(req);
-    const liveRoomId = getLiveRoomIdFromRequest(req.body);
+    const liveRoomId = getLiveRoomIdFromRequest(req.body) ?? DEFAULT_LIVE_ROOM_ID;
+    requireRoomHostUser(req, liveRoomId);
     res.json(await generateHostCue(liveRoomId));
   } catch (error) {
     res.status(getErrorStatus(error)).json(createAiErrorResponse(getErrorMessage(error)));
@@ -756,16 +1027,27 @@ app.post("/api/ai/host-cue", async (req, res) => {
 
 app.post("/api/ai/bid-risk", async (req, res) => {
   try {
-    requireHostUser(req);
     const schema = z.object({
       liveRoomId: z.string().min(1).optional(),
       userId: z.string().min(1),
       price: z.number().positive()
     });
     const input = schema.parse(req.body);
-    res.json(await detectBidRisk(input));
+    const liveRoomId = input.liveRoomId ?? DEFAULT_LIVE_ROOM_ID;
+    requireRoomHostUser(req, liveRoomId);
+    res.json(await detectBidRisk({ ...input, liveRoomId }));
   } catch (error) {
     res.status(getErrorStatus(error)).json(createAiErrorResponse(getErrorMessage(error)));
+  }
+});
+
+io.use((socket, next) => {
+  try {
+    const token = getSocketAuthToken(socket);
+    socket.data.user = getUserByToken(token);
+    next();
+  } catch (error) {
+    next(new Error(getErrorMessage(error)));
   }
 });
 
@@ -793,20 +1075,36 @@ io.on("connection", (socket) => {
     socket.emit("danmaku:history", getDanmakuMessages(liveRoomId));
   });
 
-  socket.on("auction:bid", (payload, callback) => {
+  socket.on("auction:bid", async (payload, callback) => {
     try {
       const schema = z.object({
         liveRoomId: z.string().min(1).optional(),
         userId: z.string().min(1).optional(),
         nickname: z.string().min(1).optional(),
         price: z.number().positive(),
-        token: z.string().min(1).optional(),
         clientRequestId: z.string().min(1)
       });
       const input = schema.parse(payload);
-      const authUser = input.token ? getUserByToken(input.token) : null;
-      const bidder = resolveBidder(input, authUser);
-      const result = placeBid({ ...input, ...bidder });
+      const authUser = getSocketUser(socket);
+      const bidder = resolveBidder(authUser);
+      const liveRoomId = input.liveRoomId ?? DEFAULT_LIVE_ROOM_ID;
+      const result = placeBid({
+        liveRoomId,
+        price: input.price,
+        clientRequestId: input.clientRequestId,
+        ...bidder
+      });
+      writeAuditLog(authUser, "BID_PLACE", {
+        liveRoomId: result.snapshot.auction.liveRoomId,
+        targetId: result.bid.id,
+        detail: {
+          channel: "socket.io",
+          price: result.bid.price,
+          duplicate: result.duplicate,
+          settled: result.settled
+        }
+      });
+      await flushPersistence();
 
       broadcastAuctionEvent(result.snapshot.auction.liveRoomId, "auction:bid-success", result.snapshot);
 
@@ -824,21 +1122,21 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("danmaku:send", (payload, callback) => {
+  socket.on("danmaku:send", async (payload, callback) => {
     try {
       const schema = z.object({
         liveRoomId: z.string().min(1),
         userId: z.string().min(1).optional(),
         nickname: z.string().min(1).optional(),
-        token: z.string().min(1).optional(),
         content: z.string().min(1).max(80)
       });
       const input = schema.parse(payload);
-      const authUser = input.token ? getUserByToken(input.token) : null;
+      const authUser = getSocketUser(socket);
       const message = sendDanmakuMessage({
         liveRoomId: input.liveRoomId,
         ...parseDanmakuInput(input, authUser)
       });
+      await flushPersistence();
 
       broadcastAuctionEvent(input.liveRoomId, "danmaku:new", message);
       callback?.({ ok: true, message });
@@ -882,7 +1180,7 @@ miniprogramWss.on("connection", (ws) => {
   miniprogramClients.set(ws, { liveRoomId: null });
   sendMiniprogramEvent(ws, "auction:snapshot", getSnapshot(DEFAULT_LIVE_ROOM_ID));
 
-  ws.on("message", (raw) => {
+  ws.on("message", async (raw) => {
     try {
       const message = parseMiniprogramMessage(raw);
 
@@ -918,6 +1216,17 @@ miniprogramWss.on("connection", (ws) => {
           price: payload.price,
           clientRequestId: payload.clientRequestId
         });
+        writeAuditLog(authUser, "BID_PLACE", {
+          liveRoomId: payload.liveRoomId,
+          targetId: result.bid.id,
+          detail: {
+            channel: "miniprogram-ws",
+            price: result.bid.price,
+            duplicate: result.duplicate,
+            settled: result.settled
+          }
+        });
+        await flushPersistence();
 
         broadcastAuctionEvent(payload.liveRoomId, "auction:bid-success", result.snapshot);
 
@@ -952,6 +1261,7 @@ miniprogramWss.on("connection", (ws) => {
           nickname: authUser.nickname,
           content: payload.content
         });
+        await flushPersistence();
 
         broadcastAuctionEvent(payload.liveRoomId, "danmaku:new", danmaku);
         sendMiniprogramEvent(ws, "danmaku:ack", {
@@ -974,6 +1284,8 @@ miniprogramWss.on("connection", (ws) => {
   });
 });
 
+await initializePersistence();
+
 server.listen(PORT, () => {
   console.log(`Auction server is running on http://localhost:${PORT}`);
 });
@@ -992,6 +1304,15 @@ function getErrorMessage(error: unknown) {
 
 function getErrorStatus(error: unknown) {
   const message = getErrorMessage(error);
+
+  if (
+    message.includes("缺少登录 token") ||
+    message.includes("登录已失效") ||
+    message === "用户不存在"
+  ) {
+    return 401;
+  }
+
   if (message.includes("专场不存在") || message.includes("不存在")) {
     return 404;
   }
@@ -1005,7 +1326,7 @@ function getErrorStatus(error: unknown) {
     return 403;
   }
 
-  return 401;
+  return 400;
 }
 
 function createAiErrorResponse(message: string) {
@@ -1086,10 +1407,24 @@ function getProductIdFromRequest(body: unknown) {
 }
 
 async function readUpload(req: express.Request) {
+  const contentLength = Number(req.headers["content-length"] ?? 0);
+
+  if (Number.isFinite(contentLength) && contentLength > MAX_UPLOAD_BYTES) {
+    throw new Error(`上传文件不能超过 ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)}MB`);
+  }
+
   const chunks: Buffer[] = [];
+  let totalBytes = 0;
 
   for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    totalBytes += buffer.length;
+
+    if (totalBytes > MAX_UPLOAD_BYTES) {
+      throw new Error(`上传文件不能超过 ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)}MB`);
+    }
+
+    chunks.push(buffer);
   }
 
   return Buffer.concat(chunks);
@@ -1194,12 +1529,28 @@ function getAuthToken(req: express.Request) {
   return auth.slice("Bearer ".length).trim();
 }
 
-function getOptionalAuthUser(req: express.Request) {
-  try {
-    return getUserByToken(getAuthToken(req));
-  } catch {
-    return null;
+function getSocketAuthToken(socket: Socket) {
+  const authToken = socket.handshake.auth?.token;
+  const queryToken = socket.handshake.query?.token;
+  const token = Array.isArray(authToken)
+    ? authToken[0]
+    : authToken ?? (Array.isArray(queryToken) ? queryToken[0] : queryToken);
+
+  if (typeof token !== "string" || !token.trim()) {
+    throw new Error("缺少登录 token");
   }
+
+  return token.trim();
+}
+
+function getSocketUser(socket: Socket) {
+  const user = socket.data.user as AuthenticatedUser | undefined;
+
+  if (!user) {
+    throw new Error("缺少登录 token");
+  }
+
+  return user;
 }
 
 function requireHostUser(req: express.Request) {
@@ -1212,28 +1563,57 @@ function requireHostUser(req: express.Request) {
   return user;
 }
 
-function resolveBidder(
-  input: { userId?: string; nickname?: string },
-  authUser: { id: string; nickname: string; role?: string } | null
-) {
-  if (authUser) {
-    if (authUser.role !== "BUYER") {
-      throw new Error("只有买家账号可以出价");
-    }
+function requireRoomHostUser(req: express.Request, liveRoomId: string) {
+  const user = requireHostUser(req);
 
-    return {
-      userId: authUser.id,
-      nickname: authUser.nickname
-    };
+  if (user.role === "ADMIN") {
+    return user;
   }
 
-  if (!input.userId || !input.nickname) {
-    throw new Error("用户 ID 和昵称不能为空");
+  const liveRoom = getLiveRoom(liveRoomId);
+  if (liveRoom.ownerUserId !== user.id) {
+    throw new Error("没有该直播间管理权限");
+  }
+
+  return user;
+}
+
+function requireDemoResetUser(req: express.Request) {
+  const user = requireHostUser(req);
+
+  if (user.role === "ADMIN" || user.id === "user-demo-host" || user.account === "demo-host") {
+    return user;
+  }
+
+  throw new Error("没有演示数据重置权限");
+}
+
+function getBuyerAuctionHistory(liveRoomId: string, userId: string) {
+  return getAuctionHistory(liveRoomId)
+    .filter(
+      (item) =>
+        item.bids.some((bid) => bid.userId === userId) ||
+        item.order?.buyerUserId === userId
+    )
+    .map((item) => ({
+      ...item,
+      bids: item.bids.filter((bid) => bid.userId === userId),
+      order: item.order?.buyerUserId === userId ? item.order : null
+    }));
+}
+
+function resolveBidder(authUser: { id: string; nickname: string; role?: string } | null) {
+  if (!authUser) {
+    throw new Error("缺少登录 token");
+  }
+
+  if (authUser.role !== "BUYER") {
+    throw new Error("只有买家账号可以出价");
   }
 
   return {
-    userId: input.userId,
-    nickname: input.nickname
+    userId: authUser.id,
+    nickname: authUser.nickname
   };
 }
 
@@ -1248,21 +1628,13 @@ function parseDanmakuInput(
   });
   const parsed = schema.parse(input);
 
-  if (authUser) {
-    return {
-      userId: authUser.id,
-      nickname: authUser.nickname,
-      content: parsed.content
-    };
-  }
-
-  if (!parsed.userId || !parsed.nickname) {
-    throw new Error("用户 ID 和昵称不能为空");
+  if (!authUser) {
+    throw new Error("缺少登录 token");
   }
 
   return {
-    userId: parsed.userId,
-    nickname: parsed.nickname,
+    userId: authUser.id,
+    nickname: authUser.nickname,
     content: parsed.content
   };
 }

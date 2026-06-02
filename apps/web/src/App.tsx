@@ -39,6 +39,7 @@ import type {
   DanmakuMessage,
   LiveRoom,
   Order,
+  AuditLog,
   BidRisk,
   ProductQueueItem
 } from "./types";
@@ -81,6 +82,7 @@ type RegisterInput = {
   password: string;
   nickname: string;
   role: "HOST" | "BUYER";
+  hostInviteCode?: string;
 };
 
 type CreateRoomInput = {
@@ -185,6 +187,7 @@ export function App() {
   const [historyItems, setHistoryItems] = useState<AuctionHistoryItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [productQueue, setProductQueue] = useState<ProductQueueItem[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [danmakuMessages, setDanmakuMessages] = useState<DanmakuMessage[]>([]);
   const [danmakuBlockedUsers, setDanmakuBlockedUsers] = useState<DanmakuBlockedUser[]>([]);
   const [danmakuText, setDanmakuText] = useState("");
@@ -313,6 +316,7 @@ export function App() {
     setLiveRoom(null);
     setDanmakuMessages([]);
     setDanmakuBlockedUsers([]);
+    setAuditLogs([]);
     setLoadError(null);
     setConnected(false);
     setMessage(`正在进入直播间 ${liveRoomId}...`);
@@ -348,6 +352,7 @@ export function App() {
         void refreshArchiveData();
         void refreshProductQueue();
         void refreshDanmakuBlockedUsers();
+        void refreshAuditLogs();
       } catch (error) {
         if (cancelled) {
           return;
@@ -362,6 +367,7 @@ export function App() {
 
     const socket = io(API_URL, {
       transports: ["websocket", "polling"],
+      auth: { token: session.token },
       reconnectionAttempts: 10
     });
 
@@ -443,6 +449,7 @@ export function App() {
     socket.on("auction:bid-success", (data: AuctionSnapshot) => {
       if (updateSnapshot(data)) {
         setMessage(`当前最高价已更新为 ${formatMoney(data.auction.currentPrice)}`);
+        void refreshAuditLogs();
       }
     });
     socket.on("auction:extended", (data: AuctionSnapshot) => {
@@ -465,10 +472,15 @@ export function App() {
     socket.on("order:paid", (data: AuctionSnapshot) => {
       if (updateSnapshot(data)) {
         void refreshArchiveData();
+        void refreshAuditLogs();
       }
     });
     socket.on("auction:error", (data: { message?: string }) => {
       setMessage(data.message ?? "实时消息订阅失败");
+    });
+    socket.on("connect_error", (error) => {
+      setConnected(false);
+      setMessage(error.message || "实时连接鉴权失败，请重新登录");
     });
 
     function syncSnapshotClock(data: AuctionSnapshot) {
@@ -563,6 +575,12 @@ export function App() {
   );
   const currentRoomDanmakuMessages = danmakuMessages.filter((item) => isVisibleDanmaku(item, liveRoomId));
   const visibleFlyingDanmaku = currentRoomDanmakuMessages.filter((item) => now - item.createdAt <= 8_000);
+  const canPayCurrentOrder = Boolean(
+    snapshot?.order &&
+      viewMode === "buyer" &&
+      currentUser?.id === snapshot.order.buyerUserId &&
+      snapshot.order.status !== "PAID"
+  );
 
   async function handleDemoLogin(role: "HOST" | "BUYER") {
     setAuthMessage("正在登录演示账号...");
@@ -618,6 +636,14 @@ export function App() {
   }
 
   async function handleLogout() {
+    if (session?.token) {
+      try {
+        await logoutWeb(session);
+      } catch {
+        // Local logout should still clear stale client state if the network is unavailable.
+      }
+    }
+
     setSession(null);
     writeStoredSession(null);
     setAuthMessage("");
@@ -721,6 +747,7 @@ export function App() {
     setSnapshot(data);
     setMessage("竞拍已启动");
     void refreshArchiveData();
+    void refreshAuditLogs();
   }
 
   async function cancelAuction() {
@@ -738,6 +765,7 @@ export function App() {
 
     setSnapshot(data);
     void refreshArchiveData();
+    void refreshAuditLogs();
   }
 
   function placeUserBid() {
@@ -766,7 +794,6 @@ export function App() {
     emitBid({
       userId,
       nickname: cleanNickname,
-      token: viewMode === "buyer" ? session?.token : undefined,
       price,
       onDone: () => {
         setSubmittingBid(false);
@@ -777,7 +804,6 @@ export function App() {
   function emitBid(input: {
     userId: string;
     nickname: string;
-    token?: string;
     price: number;
     onDone?: () => void;
   }) {
@@ -793,7 +819,6 @@ export function App() {
         userId: input.userId,
         liveRoomId,
         nickname: input.nickname,
-        token: input.token,
         price: input.price,
         clientRequestId: `${input.userId}-${Date.now()}-${Math.random().toString(16).slice(2)}`
       },
@@ -846,7 +871,6 @@ export function App() {
         liveRoomId,
         userId: danmakuSender.userId,
         nickname: danmakuSender.nickname,
-        token: session?.token,
         content
       },
       (response: { ok: boolean; message?: DanmakuMessage | string }) => {
@@ -921,9 +945,14 @@ export function App() {
       return;
     }
 
+    if (!canPayCurrentOrder) {
+      setMessage("只有成交买家可以模拟支付");
+      return;
+    }
+
     const res = await fetch(`${API_URL}/api/orders/${snapshot.order.id}/pay`, {
       method: "POST",
-      headers: viewMode === "buyer" ? getAuthHeaders(session) : undefined
+      headers: getAuthHeaders(session)
     });
     const data = await readJson<PayOrderResponse & { message?: string }>(res);
 
@@ -959,8 +988,11 @@ export function App() {
           : {
               headers: getAuthHeaders(session)
             };
+      const historyInit = {
+        headers: getAuthHeaders(session)
+      };
       const [historyRes, ordersRes] = await Promise.all([
-        fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/auction/history`),
+        fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/auction/history`, historyInit),
         fetch(ordersUrl, ordersInit)
       ]);
       const historyData = await readJson<{ items?: AuctionHistoryItem[] }>(historyRes);
@@ -985,6 +1017,25 @@ export function App() {
       setProductQueue(data.items ?? []);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "商品队列加载失败");
+    }
+  }
+
+  async function refreshAuditLogs() {
+    if (viewMode !== "host") {
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/audit-logs`, {
+        headers: getAuthHeaders(session)
+      });
+      const data = await readJson<{ items?: AuditLog[]; message?: string }>(res);
+
+      if (res.ok) {
+        setAuditLogs(data.items ?? []);
+      }
+    } catch {
+      // Audit logs are secondary; keep the live room usable.
     }
   }
 
@@ -1046,6 +1097,7 @@ export function App() {
       setProductQueue(data.items ?? []);
       setMessage(editingProductId ? "商品已更新" : "商品已新增");
       clearProductForm();
+      void refreshAuditLogs();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存商品失败");
     } finally {
@@ -1070,6 +1122,7 @@ export function App() {
 
     setProductQueue(data.items ?? []);
     setMessage("商品已下架");
+    void refreshAuditLogs();
   }
 
   async function moveProduct(productId: string, direction: -1 | 1) {
@@ -1098,6 +1151,7 @@ export function App() {
 
     setProductQueue(data.items ?? []);
     setMessage("商品排序已更新");
+    void refreshAuditLogs();
   }
 
   async function resetDemoData() {
@@ -1122,6 +1176,7 @@ export function App() {
 
       setDanmakuMessages([]);
       setDanmakuBlockedUsers([]);
+      setAuditLogs([]);
       setOrders([]);
       setHistoryItems([]);
       clearProductForm();
@@ -1184,6 +1239,7 @@ export function App() {
 
     setDanmakuMessages((current) => current.filter((item) => item.id !== messageId));
     setMessage("弹幕已撤回");
+    void refreshAuditLogs();
   }
 
   async function blockDanmakuUser(item: DanmakuMessage) {
@@ -1213,6 +1269,7 @@ export function App() {
       return [blockedUser, ...rest];
     });
     setMessage(`${item.nickname} 已被屏蔽`);
+    void refreshAuditLogs();
   }
 
   async function handleProductFileChange(event: React.ChangeEvent<HTMLInputElement>) {
@@ -1249,6 +1306,7 @@ export function App() {
       });
       setProductQueue(data.items ?? []);
       setMessage(`导入完成：成功 ${data.importedCount} 件，失败 ${data.failedRows?.length ?? 0} 行`);
+      void refreshAuditLogs();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "导入失败");
     } finally {
@@ -1276,6 +1334,7 @@ export function App() {
     setMessage(`已开始：${data.product.name}`);
     void refreshProductQueue();
     void refreshArchiveData();
+    void refreshAuditLogs();
   }
 
   async function regenerateProductScript(productId: string) {
@@ -2023,6 +2082,22 @@ export function App() {
                 }))}
               />
             </section>
+
+            <section className="panel-section">
+              <div className="section-title">
+                <ShieldAlert size={18} />
+                <h2>最近操作</h2>
+              </div>
+              <ArchiveList
+                emptyText="暂无审计日志"
+                items={auditLogs.slice(0, 20).map((item) => ({
+                  id: item.id,
+                  title: getAuditActionText(item.action),
+                  meta: formatAuditMeta(item),
+                  time: item.createdAt
+                }))}
+              />
+            </section>
           </>
         ) : null}
 
@@ -2046,9 +2121,15 @@ export function App() {
                 <span>订单号</span>
                 <strong>{snapshot.order.id.slice(0, 8)}</strong>
               </div>
-              <button disabled={snapshot.order.status === "PAID"} onClick={payOrder}>
+              <button disabled={!canPayCurrentOrder} onClick={payOrder}>
                 <CreditCard size={16} />
-                <span>{snapshot.order.status === "PAID" ? "支付已完成" : "模拟支付"}</span>
+                <span>
+                  {snapshot.order.status === "PAID"
+                    ? "支付已完成"
+                    : canPayCurrentOrder
+                      ? "模拟支付"
+                      : "等待买家支付"}
+                </span>
               </button>
             </div>
           ) : (
@@ -2180,6 +2261,7 @@ function LoginRoute(props: {
   const [password, setPassword] = useState("");
   const [nickname, setNickname] = useState("");
   const [role, setRole] = useState<"HOST" | "BUYER">(props.preferredRole);
+  const [hostInviteCode, setHostInviteCode] = useState("");
   const isRegister = props.mode === "register";
   const nicknamePlaceholder = role === "BUYER" ? "买家昵称" : "主播或店铺名称";
 
@@ -2195,7 +2277,8 @@ function LoginRoute(props: {
         account,
         password,
         nickname,
-        role
+        role,
+        hostInviteCode: role === "HOST" ? hostInviteCode : undefined
       });
       return;
     }
@@ -2267,6 +2350,18 @@ function LoginRoute(props: {
                 <option value="HOST">商家/主播</option>
                 <option value="BUYER">买家预览</option>
               </select>
+            </label>
+          ) : null}
+          {isRegister && role === "HOST" ? (
+            <label className="field">
+              <span>主播邀请码</span>
+              <input
+                type="password"
+                value={hostInviteCode}
+                maxLength={80}
+                placeholder="HOST_INVITE_CODE"
+                onChange={(event) => setHostInviteCode(event.target.value)}
+              />
             </label>
           ) : null}
           <button className="primary-button" type="submit">
@@ -2512,6 +2607,13 @@ async function loginWeb(input: { account: string; password: string }): Promise<W
     token: data.token,
     user: data.user
   };
+}
+
+async function logoutWeb(session: WebSession) {
+  await fetch(`${API_URL}/api/auth/logout`, {
+    method: "POST",
+    headers: getAuthHeaders(session)
+  });
 }
 
 async function registerWeb(input: RegisterInput): Promise<{ user: AuthUser }> {
@@ -2799,6 +2901,59 @@ function getBidRiskText(risk: BidRisk) {
   }
 
   return "正常";
+}
+
+function getAuditActionText(action: string) {
+  const actionText: Record<string, string> = {
+    AUCTION_START: "开始竞拍",
+    AUCTION_CANCEL: "取消竞拍",
+    BID_PLACE: "买家出价",
+    ORDER_PAY: "模拟支付",
+    PRODUCT_CREATE: "新增商品",
+    PRODUCT_UPDATE: "编辑商品",
+    PRODUCT_ARCHIVE: "下架商品",
+    PRODUCT_IMPORT: "导入商品",
+    PRODUCT_REORDER: "调整排序",
+    PRODUCT_START_AUCTION: "开始商品",
+    DANMAKU_RETRACT: "撤回弹幕",
+    DANMAKU_BLOCK_USER: "屏蔽用户",
+    LIVE_ROOM_CREATE: "创建直播间",
+    DEMO_RESET: "重置演示",
+    LOGIN_RATE_LIMITED: "登录限流"
+  };
+
+  return actionText[action] ?? action;
+}
+
+function formatAuditMeta(item: AuditLog) {
+  const detail = item.detail ?? {};
+  const actor = `${item.userNickname || item.userId} / ${item.role}`;
+
+  if (typeof detail.price === "number") {
+    return `${actor} / ${formatMoney(detail.price)}`;
+  }
+
+  if (typeof detail.finalPrice === "number") {
+    return `${actor} / ${formatMoney(detail.finalPrice)}`;
+  }
+
+  if (typeof detail.productName === "string") {
+    return `${actor} / ${detail.productName}`;
+  }
+
+  if (typeof detail.name === "string") {
+    return `${actor} / ${detail.name}`;
+  }
+
+  if (typeof detail.reason === "string") {
+    return `${actor} / ${detail.reason}`;
+  }
+
+  if (typeof detail.importedCount === "number") {
+    return `${actor} / 成功 ${detail.importedCount} 件`;
+  }
+
+  return item.targetId ? `${actor} / ${item.targetId}` : actor;
 }
 
 function formatMoney(value: number) {

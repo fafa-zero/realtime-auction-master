@@ -19,9 +19,11 @@
 - 竞拍支持起拍价、最低加价、封顶价、倒计时、成交/流拍/取消。
 - 达到封顶价自动成交，并生成模拟订单。
 - Web Socket.IO 实时同步竞拍和弹幕；小程序通过 `/miniprogram-ws` 实时同步，REST 轮询与 HTTP 提交接口作为兜底。
+- Socket.IO 在连接阶段校验 token，事件内使用服务端解析的用户身份，避免前端伪造买家信息。
 - 弹幕支持发送、历史列表、飞屏展示、限频、敏感词过滤、主播撤回和屏蔽用户。
+- 主播开拍、取消、商品管理、弹幕治理、出价、支付和登录限流会写入审计日志。
 - AI 助手支持商品讲解词、竞拍复盘、主播实时话术和异常出价提示；未配置模型时有本地兜底结果。
-- 本地 JSON 持久化，重启后保留用户、会话、直播间、竞拍、订单和弹幕。
+- 本地 JSON 持久化，重启后保留用户、会话、直播间、竞拍、订单、弹幕和审计日志。
 
 ## 技术栈
 
@@ -86,7 +88,7 @@ Web 内置演示账号：
 也可以直接注册新账号：
 
 - Web 观众端注册买家账号后，可以在小程序使用同一账号登录。
-- Web 主播端注册商家账号后，会进入创建直播间流程。
+- Web 主播端注册商家账号需要填写 `HOST_INVITE_CODE` 对应的邀请码，注册后会进入创建直播间流程。
 
 ## 稳定演示状态
 
@@ -159,6 +161,8 @@ MYSQL_PORT=3306
 MYSQL_USER=root
 MYSQL_PASSWORD=
 MYSQL_DATABASE=realtime_auction
+HOST_INVITE_CODE=
+MAX_UPLOAD_BYTES=2097152
 AI_API_URL=
 AI_API_KEY=
 AI_MODEL=
@@ -172,6 +176,8 @@ AI_MODEL=
 - `DATABASE_URL`：MySQL 连接字符串，优先级高于拆分的 `MYSQL_*` 配置。
 - `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DATABASE`：MySQL 连接配置。
 - `AUCTION_DATA_FILE`：JSON 兜底状态文件路径；MySQL 不可用时仍可保证本地演示。
+- `HOST_INVITE_CODE`：主播注册邀请码；未配置时只能使用已有主播账号，不能公开注册新主播。
+- `MAX_UPLOAD_BYTES`：商品模板上传大小上限，默认 2MB。
 - `AI_API_URL` / `AI_API_KEY` / `AI_MODEL`：可选 AI 模型配置。
 
 未配置 AI 时，系统会使用本地兜底生成讲解词、复盘和风险提示，保证演示不中断。
@@ -212,14 +218,17 @@ npm --workspace apps/server run start
 DATABASE_URL=mysql://root:your_password@127.0.0.1:3306/realtime_auction
 ```
 
-当前 MySQL 表按业务实体拆分为直播间、用户、会话、商品、竞拍、出价、订单、历史、弹幕和屏蔽用户表。每张表用 `entity_key + data_json` 保存实体快照，适合演示阶段稳定迁移；后续可继续拆成完全范式化字段表。
+当前 MySQL 表按业务实体拆分为直播间、用户、会话、商品、竞拍、出价、订单、历史、弹幕、屏蔽用户和审计日志表。每张表用 `entity_key + data_json` 保存实体快照，适合演示阶段稳定迁移；后续可继续拆成完全范式化字段表。
 
 ## 核心接口
+
+详细请求/响应和权限说明见 [docs/api-reference.md](docs/api-reference.md)。
 
 账号：
 
 - `POST /api/auth/web/register`：注册 Web/小程序共用账号。
 - `POST /api/auth/web/login`：账号密码登录。
+- `POST /api/auth/logout`：注销当前 token。
 - `GET /api/me`：获取当前登录用户。
 - `GET /api/me/live-rooms`：获取当前主播拥有的直播间。
 - `GET /api/me/orders`：获取当前买家订单。
@@ -255,10 +264,16 @@ DATABASE_URL=mysql://root:your_password@127.0.0.1:3306/realtime_auction
 - `POST /api/live-rooms/:liveRoomId/danmaku/:messageId/retract`：撤回弹幕。
 - `POST /api/live-rooms/:liveRoomId/danmaku/block-user`：屏蔽弹幕用户。
 
+审计：
+
+- `GET /api/live-rooms/:liveRoomId/audit-logs`：查询最近 20 条审计日志，仅房主主播或管理员可访问。
+
 Socket.IO：
 
+连接时通过 `auth.token` 传入登录 token；未登录或 token 失效的连接会被拒绝。
+
 - `auction:snapshot`
-- `auction:join-room`
+- `auction:join`
 - `auction:bid`
 - `auction:bid-success`
 - `auction:extended`

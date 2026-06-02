@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { completeWithModel } from "./ai.js";
@@ -9,6 +9,7 @@ import {
   type PersistedAuctionState
 } from "./mysqlPersistence.js";
 import type {
+  AuditLog,
   Auction,
   AuctionHistoryItem,
   AuctionSnapshot,
@@ -29,6 +30,12 @@ const DEFAULT_LIVE_ROOM_ID = "live-1";
 const DEMO_HOST_USER_ID = "user-demo-host";
 const DEFAULT_JEWELRY_IMAGE_URL = "/static/jewelry.jpg";
 const DEFAULT_WATCH_IMAGE_URL = "/static/watch.jpg";
+const PASSWORD_HASH_PREFIX = "scrypt";
+const PASSWORD_SALT_BYTES = 16;
+const PASSWORD_KEY_BYTES = 64;
+let mysqlPersistenceReady = false;
+let mysqlPersistenceDisabled = false;
+let pendingPersistenceSave: Promise<void> = Promise.resolve();
 
 const products: Product[] = createDefaultProducts();
 const liveRooms: LiveRoom[] = createDefaultLiveRooms();
@@ -42,6 +49,7 @@ const users: User[] = [];
 const sessions: Session[] = [];
 const danmakuMessages: DanmakuMessage[] = [];
 const danmakuBlockedUsers: DanmakuBlockedUser[] = [];
+const auditLogs: AuditLog[] = [];
 const danmakuRateLimits = new Map<string, number[]>();
 
 loadState();
@@ -72,7 +80,7 @@ export interface LoginWebInput {
 
 export interface RegisterWebInput extends LoginWebInput {
   nickname?: string;
-  role?: "BUYER" | "HOST" | "ADMIN";
+  role?: "BUYER" | "HOST";
 }
 
 export interface ProductImportRow {
@@ -89,6 +97,16 @@ export interface ProductImportRow {
 }
 
 export type ProductManageInput = ProductImportRow;
+
+export interface AuditLogInput {
+  userId: string;
+  userNickname: string;
+  role: AuditLog["role"];
+  liveRoomId?: string;
+  action: string;
+  targetId?: string;
+  detail?: Record<string, unknown>;
+}
 
 export async function initializePersistence() {
   if (!isMysqlPersistenceConfigured()) {
@@ -108,11 +126,16 @@ export async function initializePersistence() {
     }
 
     saveState();
+    await flushPersistence();
     console.log("MySQL persistence is enabled");
   } catch (error) {
     mysqlPersistenceDisabled = true;
     console.warn(`MySQL 持久化不可用，已回落本地 JSON：${error instanceof Error ? error.message : "未知错误"}`);
   }
+}
+
+export async function flushPersistence() {
+  await pendingPersistenceSave;
 }
 
 export interface CreateLiveRoomInput {
@@ -136,11 +159,10 @@ const RISK_REPEAT_BID_LIMIT = 3;
 const RISK_LARGE_JUMP_MULTIPLIER = 5;
 const RISK_EXTREME_JUMP_MULTIPLIER = 10;
 const DANMAKU_HISTORY_LIMIT = 80;
+const AUDIT_LOG_LIMIT = 1_000;
 const DANMAKU_RATE_LIMIT_WINDOW_MS = 10_000;
 const DANMAKU_RATE_LIMIT_COUNT = 5;
 const DANMAKU_SENSITIVE_WORDS = ["假货", "骗子", "诈骗", "刷单", "加微信", "私聊"];
-let mysqlPersistenceReady = false;
-let mysqlPersistenceDisabled = false;
 
 function createDefaultProducts(): Product[] {
   return [
@@ -363,6 +385,41 @@ export function getDanmakuBlockedUsers(liveRoomId = DEFAULT_LIVE_ROOM_ID) {
     .map((item) => ({ ...item }));
 }
 
+export function getAuditLogs(liveRoomId?: string, limit = 20) {
+  if (liveRoomId) {
+    requireLiveRoom(liveRoomId);
+  }
+
+  return auditLogs
+    .filter((item) => !liveRoomId || item.liveRoomId === liveRoomId)
+    .slice(0, limit)
+    .map(cloneAuditLog);
+}
+
+export function recordAuditLog(input: AuditLogInput) {
+  if (input.liveRoomId) {
+    requireLiveRoom(input.liveRoomId);
+  }
+
+  const log: AuditLog = {
+    id: `audit-${randomUUID()}`,
+    userId: input.userId,
+    userNickname: input.userNickname,
+    role: input.role,
+    liveRoomId: input.liveRoomId,
+    action: input.action,
+    targetId: input.targetId,
+    detail: input.detail ? { ...input.detail } : undefined,
+    createdAt: Date.now()
+  };
+
+  auditLogs.unshift(log);
+  auditLogs.splice(AUDIT_LOG_LIMIT);
+  saveState();
+
+  return cloneAuditLog(log);
+}
+
 export function sendDanmakuMessage(input: {
   liveRoomId: string;
   userId: string;
@@ -533,7 +590,7 @@ export function registerWebUser(input: RegisterWebInput) {
   const user: User = {
     id: `user-${randomUUID()}`,
     account,
-    password,
+    password: hashPassword(password),
     nickname: input.nickname?.trim() || account,
     avatarUrl: "",
     role: input.role ?? "HOST",
@@ -555,8 +612,12 @@ export function loginWebUser(input: LoginWebInput) {
     throw new Error("账号不存在，请先注册");
   }
 
-  if (user.password !== password) {
+  if (!verifyPassword(password, user.password ?? "")) {
     throw new Error("账号或密码错误");
+  }
+
+  if (!isPasswordHash(user.password ?? "")) {
+    user.password = hashPassword(password);
   }
 
   const session = createSession(user.id);
@@ -568,6 +629,17 @@ export function loginWebUser(input: LoginWebInput) {
     expiresAt: session.expiresAt,
     user: sanitizeUser(user)
   };
+}
+
+export function logoutSession(token: string) {
+  const index = sessions.findIndex((item) => item.token === token);
+
+  if (index >= 0) {
+    sessions.splice(index, 1);
+    saveState();
+  }
+
+  return { ok: true };
 }
 
 export function getUserByToken(token: string) {
@@ -1038,7 +1110,7 @@ export function settleAuction(liveRoomId = DEFAULT_LIVE_ROOM_ID) {
         buyerNickname: auction.winnerNickname,
         finalPrice: auction.currentPrice,
         status: "PENDING_PAYMENT",
-        createdAt: Date.now()
+        createdAt: Math.max(Date.now(), (auction.startTime ?? 0) + 1)
       });
     }
   } else {
@@ -1215,6 +1287,7 @@ export function resetDemoState() {
   sessions.splice(0, sessions.length);
   danmakuMessages.splice(0, danmakuMessages.length);
   danmakuBlockedUsers.splice(0, danmakuBlockedUsers.length);
+  auditLogs.splice(0, auditLogs.length);
   danmakuRateLimits.clear();
   processedBidRequestIds.clear();
   ensureDemoWebAccounts();
@@ -1289,7 +1362,7 @@ function getCurrentOrder(auctionId: string) {
     return null;
   }
 
-  return orders.find((item) => item.auctionId === auctionId && item.createdAt >= startTime) ?? null;
+  return orders.find((item) => item.auctionId === auctionId && item.createdAt > startTime) ?? null;
 }
 
 function archiveCurrentAuction(liveRoomId: string) {
@@ -1410,7 +1483,7 @@ function ensureDemoWebAccounts() {
     {
       id: DEMO_HOST_USER_ID,
       account: "demo-host",
-      password: "demo123",
+      password: hashPassword("demo123"),
       nickname: "演示主播",
       avatarUrl: "",
       role: "HOST",
@@ -1419,7 +1492,7 @@ function ensureDemoWebAccounts() {
     {
       id: "user-demo-buyer",
       account: "demo-buyer",
-      password: "demo123",
+      password: hashPassword("demo123"),
       nickname: "Web 预览买家",
       avatarUrl: "",
       role: "BUYER",
@@ -1671,33 +1744,13 @@ function saveState() {
   writeFileSync(DATA_FILE, JSON.stringify(state, null, 2));
 
   if (mysqlPersistenceReady && !mysqlPersistenceDisabled) {
-    void saveMysqlState(state);
+    pendingPersistenceSave = saveMysqlState(state);
+  } else {
+    pendingPersistenceSave = Promise.resolve();
   }
 }
 
 function loadState() {
-  if (isMysqlPersistenceConfigured()) {
-    void loadMysqlState()
-      .then((data) => {
-        mysqlPersistenceReady = true;
-
-        if (data) {
-          applyPersistedState(data);
-          ensureDemoWebAccounts();
-          ensureDemoLiveRoomOwnership();
-          ensureLocalDemoProductImages();
-          rebuildProcessedBidRequestIds();
-          saveState();
-        } else {
-          saveState();
-        }
-      })
-      .catch((error) => {
-        mysqlPersistenceDisabled = true;
-        console.warn(`MySQL 持久化不可用，已回落本地 JSON：${error instanceof Error ? error.message : "未知错误"}`);
-      });
-  }
-
   try {
     applyPersistedState(JSON.parse(readFileSync(DATA_FILE, "utf8")) as Partial<PersistedAuctionState> & {
       auction?: Partial<Auction>;
@@ -1719,7 +1772,8 @@ function getPersistedState(): PersistedAuctionState {
     orders,
     history,
     danmakuMessages,
-    danmakuBlockedUsers
+    danmakuBlockedUsers,
+    auditLogs
   };
 }
 
@@ -1771,6 +1825,10 @@ function applyPersistedState(data: Partial<PersistedAuctionState> & { auction?: 
   if (Array.isArray(data.danmakuBlockedUsers)) {
     danmakuBlockedUsers.splice(0, danmakuBlockedUsers.length, ...data.danmakuBlockedUsers);
   }
+
+  if (Array.isArray(data.auditLogs)) {
+    auditLogs.splice(0, auditLogs.length, ...data.auditLogs.slice(0, AUDIT_LOG_LIMIT));
+  }
 }
 
 function rebuildProcessedBidRequestIds() {
@@ -1804,6 +1862,13 @@ function cloneHistoryItem(item: AuctionHistoryItem) {
   };
 }
 
+function cloneAuditLog(item: AuditLog) {
+  return {
+    ...item,
+    detail: item.detail ? { ...item.detail } : undefined
+  };
+}
+
 function sanitizeUser(user: User) {
   return {
     id: user.id,
@@ -1826,6 +1891,33 @@ function updateUserProfile(user: User, input: { nickname?: string; avatarUrl?: s
   if (input.avatarUrl !== undefined) {
     user.avatarUrl = input.avatarUrl;
   }
+}
+
+function hashPassword(password: string) {
+  const salt = randomBytes(PASSWORD_SALT_BYTES).toString("hex");
+  const hash = scryptSync(password, salt, PASSWORD_KEY_BYTES).toString("hex");
+  return `${PASSWORD_HASH_PREFIX}:${salt}:${hash}`;
+}
+
+function verifyPassword(password: string, storedPassword: string) {
+  if (!isPasswordHash(storedPassword)) {
+    return storedPassword === password;
+  }
+
+  const [, salt, hash] = storedPassword.split(":");
+
+  if (!salt || !hash) {
+    return false;
+  }
+
+  const expected = Buffer.from(hash, "hex");
+  const actual = scryptSync(password, salt, expected.length);
+
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
+}
+
+function isPasswordHash(password: string) {
+  return password.startsWith(`${PASSWORD_HASH_PREFIX}:`);
 }
 
 function normalizeDanmakuContent(content: string) {

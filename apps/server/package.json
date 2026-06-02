@@ -9,6 +9,7 @@
     "start": "node dist/index.js",
     "reset:demo": "node scripts/reset-demo-state.mjs",
     "test:integration": "npm run build && node scripts/integration-test.mjs",
+    "test:state-machine": "npm run build && node scripts/state-machine-test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

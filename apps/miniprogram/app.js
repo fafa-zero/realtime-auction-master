@@ -1,4 +1,4 @@
-const { getDefaultApiBaseUrl, getMe, loginBuyer, registerBuyer } = require("./utils/api");
+const { getDefaultApiBaseUrl, getMe, loginBuyer, logoutBuyer, registerBuyer } = require("./utils/api");
 
 const DEFAULT_API_BASE_URL = getDefaultApiBaseUrl();
 const TOKEN_STORAGE_KEY = "auction_token";
@@ -101,6 +101,12 @@ App({
   },
 
   logout() {
+    if (this.globalData.token) {
+      logoutBuyer().catch(() => {
+        // Local logout should still clear stale client state if the network is unavailable.
+      });
+    }
+
     this.clearStoredSession();
   },
 

@@ -513,10 +513,6 @@ Page({
       return "";
     }
 
-    if (product.imageUrl.startsWith("/static/")) {
-      return "";
-    }
-
     return this.resolveAssetUrl(product.imageUrl);
   },
 

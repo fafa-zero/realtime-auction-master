@@ -1,4 +1,5 @@
 import type {
+  AuditLog,
   Auction,
   AuctionHistoryItem,
   Bid,
@@ -22,6 +23,7 @@ export interface PersistedAuctionState {
   history: AuctionHistoryItem[];
   danmakuMessages: DanmakuMessage[];
   danmakuBlockedUsers: DanmakuBlockedUser[];
+  auditLogs: AuditLog[];
 }
 
 type MysqlPool = {
@@ -51,7 +53,8 @@ const MYSQL_TABLES = {
   orders: "auction_orders",
   history: "auction_history",
   danmakuMessages: "auction_danmaku_messages",
-  danmakuBlockedUsers: "auction_danmaku_blocked_users"
+  danmakuBlockedUsers: "auction_danmaku_blocked_users",
+  auditLogs: "auction_audit_logs"
 } as const;
 
 let pool: MysqlPool | null = null;
@@ -85,7 +88,8 @@ export async function loadMysqlState() {
     orders: await loadRows<Order>(mysqlPool, MYSQL_TABLES.orders),
     history: await loadRows<AuctionHistoryItem>(mysqlPool, MYSQL_TABLES.history),
     danmakuMessages: await loadRows<DanmakuMessage>(mysqlPool, MYSQL_TABLES.danmakuMessages),
-    danmakuBlockedUsers: await loadRows<DanmakuBlockedUser>(mysqlPool, MYSQL_TABLES.danmakuBlockedUsers)
+    danmakuBlockedUsers: await loadRows<DanmakuBlockedUser>(mysqlPool, MYSQL_TABLES.danmakuBlockedUsers),
+    auditLogs: await loadRows<AuditLog>(mysqlPool, MYSQL_TABLES.auditLogs)
   };
 
   return hasPersistedData(state) ? state : null;
@@ -190,6 +194,7 @@ async function writeState(mysqlPool: MysqlPool, state: PersistedAuctionState) {
     await replaceRows(connection, MYSQL_TABLES.danmakuBlockedUsers, state.danmakuBlockedUsers, (item) =>
       `${item.liveRoomId}:${item.userId}`
     );
+    await replaceRows(connection, MYSQL_TABLES.auditLogs, state.auditLogs, (item) => item.id);
     await connection.commit();
   } catch (error) {
     await connection.rollback();

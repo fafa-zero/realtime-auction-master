@@ -70,6 +70,18 @@ export interface DanmakuBlockedUser {
   blockedBy: string;
 }
 
+export interface AuditLog {
+  id: string;
+  userId: string;
+  userNickname: string;
+  role: AuthUser["role"] | "ANONYMOUS";
+  liveRoomId?: string;
+  action: string;
+  targetId?: string;
+  detail?: Record<string, unknown>;
+  createdAt: number;
+}
+
 export interface Order {
   id: string;
   auctionId: string;
