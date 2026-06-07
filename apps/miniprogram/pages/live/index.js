@@ -404,11 +404,21 @@ Page({
       event.type === "auction:started" ||
       event.type === "auction:bid-success" ||
       event.type === "auction:extended" ||
-      event.type === "auction:ended" ||
-      event.type === "order:paid"
+      event.type === "auction:ended"
     ) {
       this.applySnapshot(payload);
       this.setData({ debugText: `实时同步 ${time(Date.now())}` });
+      return;
+    }
+
+    if (event.type === "order:paid") {
+      if (payload && payload.snapshot) {
+        this.applySnapshot(payload.snapshot);
+      } else if (payload && payload.order && payload.order.liveRoomId === this.data.liveRoomId) {
+        this.loadSnapshot();
+      }
+
+      this.setData({ debugText: `订单支付状态已更新 ${time(Date.now())}` });
       return;
     }
 
@@ -647,7 +657,14 @@ Page({
 
     try {
       const result = await payOrder(order.id);
-      this.applySnapshot(result.snapshot);
+      if (result.snapshot) {
+        this.applySnapshot(result.snapshot);
+      } else {
+        this.applySnapshot({
+          ...this.data.snapshot,
+          order: result.order || result
+        });
+      }
       wx.showToast({ title: "支付成功", icon: "success" });
     } catch (error) {
       wx.showToast({ title: error.message || "支付失败", icon: "none" });

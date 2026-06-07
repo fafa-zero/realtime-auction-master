@@ -104,6 +104,7 @@ export interface AuditLog {
 export interface Order {
   id: string;
   auctionId: string;
+  liveRoomId: string;
   productId: string;
   buyerUserId: string;
   buyerNickname: string;

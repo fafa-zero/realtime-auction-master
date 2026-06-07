@@ -21,6 +21,10 @@ try {
   testOverCeilingBidRejected(store);
   testPendingOrdersBlockBid(store);
   testPaidOrdersDoNotBlockBid(store);
+  testBidIdempotencyIsScopedByAuctionAndUser(store);
+  testLateOrderPaymentDoesNotMutateCurrentAuction(store);
+  testFinishedProductCannotBeEditedOrArchived(store);
+  testBlankProductImageUsesDefaultImage(store);
 
   console.log("state machine ok");
 } finally {
@@ -323,6 +327,96 @@ function testPaidOrdersDoNotBlockBid(store) {
 
   assert.equal(allowed.bid.userId, "paid-buyer");
   assert.equal(allowed.bid.risk, undefined);
+}
+
+function testBidIdempotencyIsScopedByAuctionAndUser(store) {
+  store.resetDemoState();
+  store.startAuction("live-1", {
+    durationSeconds: 60,
+    incrementStep: 100,
+    ceilingPrice: 500
+  });
+  const first = store.placeBid({
+    liveRoomId: "live-1",
+    userId: "buyer-a",
+    nickname: "买家A",
+    price: 100,
+    clientRequestId: "shared-request-id"
+  });
+
+  store.startAuction("live-2", {
+    durationSeconds: 60,
+    incrementStep: 200,
+    ceilingPrice: 1000
+  });
+  const second = store.placeBid({
+    liveRoomId: "live-2",
+    userId: "buyer-b",
+    nickname: "买家B",
+    price: 200,
+    clientRequestId: "shared-request-id"
+  });
+
+  assert.equal(first.duplicate, false);
+  assert.equal(second.duplicate, false);
+  assert.equal(second.bid.auctionId, store.getAuction("live-2").id);
+  assert.equal(store.getSnapshot("live-2").bids.length, 1);
+}
+
+function testLateOrderPaymentDoesNotMutateCurrentAuction(store) {
+  store.resetDemoState();
+  const order = createPendingOrder(store, "late-buyer", "late-pay-bid-1");
+  const current = store.startAuction("live-1", {
+    durationSeconds: 60,
+    incrementStep: 100,
+    ceilingPrice: 500
+  });
+
+  const paid = store.payOrder(order.id);
+  const after = store.getSnapshot("live-1");
+
+  assert.equal(paid.status, "PAID");
+  assert.equal(paid.liveRoomId, "live-1");
+  assert.equal(after.auction.id, current.auction.id);
+  assert.equal(after.auction.status, "ACTIVE");
+  assert.equal(after.order, null);
+  assert.equal(store.getOrders("live-1").find((item) => item.id === order.id)?.status, "PAID");
+}
+
+function testFinishedProductCannotBeEditedOrArchived(store) {
+  store.resetDemoState();
+  createPendingOrder(store, "locked-buyer", "locked-product-bid-1");
+
+  assert.throws(
+    () =>
+      store.updateAuctionProduct("live-1", "product-1", {
+        name: "已成交后改名",
+        description: "不允许修改",
+        startPrice: 10,
+        incrementStep: 5,
+        ceilingPrice: 50,
+        durationSeconds: 60,
+        stock: 1
+      }),
+    /不能编辑/
+  );
+  assert.throws(() => store.archiveAuctionProduct("live-1", "product-1"), /不能下架/);
+}
+
+function testBlankProductImageUsesDefaultImage(store) {
+  store.resetDemoState();
+  const created = store.createAuctionProduct("live-1", {
+    name: "空图商品",
+    description: "应该使用默认图",
+    imageUrl: "",
+    startPrice: 0,
+    incrementStep: 100,
+    ceilingPrice: 300,
+    durationSeconds: 60,
+    stock: 1
+  });
+
+  assert.equal(created.item.product.imageUrl.startsWith("/static/"), true);
 }
 
 function createPendingOrder(store, userId, clientRequestId) {

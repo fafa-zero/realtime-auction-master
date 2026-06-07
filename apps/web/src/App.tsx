@@ -120,7 +120,7 @@ type PayOrderResponse =
   | {
       ok: true;
       order: Order;
-      snapshot: AuctionSnapshot;
+      snapshot: AuctionSnapshot | null;
     };
 
 type AiTask = "script" | "summary" | "cue" | "risk";
@@ -469,10 +469,17 @@ export function App() {
         void refreshArchiveData();
       }
     });
-    socket.on("order:paid", (data: AuctionSnapshot) => {
-      if (updateSnapshot(data)) {
+    socket.on("order:paid", (data: { order?: Order; snapshot?: AuctionSnapshot | null }) => {
+      if (data.snapshot && updateSnapshot(data.snapshot)) {
         void refreshArchiveData();
         void refreshAuditLogs();
+        return;
+      }
+
+      if (data.order?.liveRoomId === liveRoomId) {
+        void refreshArchiveData();
+        void refreshAuditLogs();
+        setMessage("订单支付状态已更新");
       }
     });
     socket.on("auction:error", (data: { message?: string }) => {
@@ -961,12 +968,12 @@ export function App() {
       return;
     }
 
-    if ("snapshot" in data) {
+    if ("snapshot" in data && data.snapshot) {
       setSnapshot(data.snapshot);
     } else {
       setSnapshot({
         ...snapshot,
-        order: data
+        order: "order" in data ? data.order : data
       });
     }
 

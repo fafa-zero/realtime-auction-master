@@ -193,6 +193,61 @@ async function runIntegrationFlow() {
   const ownerPay = await post(`/api/orders/${bid.data.snapshot.order.id}/pay`, {}, buyer.token);
   assert.equal(ownerPay.status, 200);
   assert.equal(ownerPay.data.order.status, "PAID");
+  assert.equal(ownerPay.data.order.liveRoomId, "live-1");
+  assert.notEqual(ownerPay.data.snapshot, undefined);
+
+  const noTokenImport = await post("/api/live-rooms/live-1/products/import", {
+    rows: []
+  });
+  assert.equal(noTokenImport.status, 401);
+
+  const buyerStartProduct = await post("/api/live-rooms/live-1/products/product-2/start", {}, buyer.token);
+  assert.equal(buyerStartProduct.status, 403);
+
+  const lateStarted = await post(
+    "/api/live-rooms/live-1/auction/start",
+    {
+      durationSeconds: 60,
+      incrementStep: 50,
+      ceilingPrice: 150
+    },
+    demoHost.token
+  );
+  assert.equal(lateStarted.status, 200);
+  const lateBid = await post(
+    "/api/live-rooms/live-1/auction/bids",
+    {
+      price: 150,
+      clientRequestId: `late-pay-bid-${suffix}`
+    },
+    otherBuyer.token
+  );
+  assert.equal(lateBid.status, 200);
+  assert.equal(lateBid.data.snapshot.order.status, "PENDING_PAYMENT");
+
+  const lateRestarted = await post(
+    "/api/live-rooms/live-1/auction/start",
+    {
+      durationSeconds: 60,
+      incrementStep: 50,
+      ceilingPrice: 200
+    },
+    demoHost.token
+  );
+  assert.equal(lateRestarted.status, 200);
+  assert.equal(lateRestarted.data.auction.status, "ACTIVE");
+
+  const latePay = await post(`/api/orders/${lateBid.data.snapshot.order.id}/pay`, {}, otherBuyer.token);
+  assert.equal(latePay.status, 200);
+  assert.equal(latePay.data.order.status, "PAID");
+  assert.equal(latePay.data.order.liveRoomId, "live-1");
+  assert.equal(latePay.data.snapshot, null);
+
+  const afterLatePay = await get("/api/live-rooms/live-1/auction");
+  assert.equal(afterLatePay.status, 200);
+  assert.equal(afterLatePay.data.auction.id, lateRestarted.data.auction.id);
+  assert.equal(afterLatePay.data.auction.status, "ACTIVE");
+  assert.equal(afterLatePay.data.order, null);
 
   const buyerAuditLogs = await get("/api/live-rooms/live-1/audit-logs", buyer.token);
   assert.equal(buyerAuditLogs.status, 403);

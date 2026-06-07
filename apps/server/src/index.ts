@@ -29,6 +29,7 @@ import {
   getOrder,
   getOrders,
   getOrdersForUser,
+  getOrderSnapshot,
   getProductQueue,
   getUserByAccount,
   getUserByToken,
@@ -717,7 +718,7 @@ app.post("/api/live-rooms/:liveRoomId/products/import", async (req, res) => {
     });
     res.json(result);
   } catch (error) {
-    res.status(400).json({ ok: false, message: getErrorMessage(error) });
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
   }
 });
 
@@ -734,7 +735,7 @@ app.post("/api/live-rooms/:liveRoomId/products/:productId/start", (req, res) => 
     broadcastAuctionEvent(req.params.liveRoomId, "auction:started", snapshot);
     res.json(snapshot);
   } catch (error) {
-    res.status(400).json({ ok: false, message: getErrorMessage(error) });
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
   }
 });
 
@@ -975,14 +976,17 @@ app.post("/api/orders/:orderId/pay", (req, res) => {
     }
 
     const paidOrder = payOrder(req.params.orderId);
-    const liveRoom = getLiveRooms().find((room) => room.currentAuctionId === paidOrder.auctionId);
-    const snapshot = getSnapshot(liveRoom?.id ?? DEFAULT_LIVE_ROOM_ID);
+    const snapshot = getOrderSnapshot(paidOrder.id);
     writeAuditLog(authUser, "ORDER_PAY", {
-      liveRoomId: snapshot.auction.liveRoomId,
+      liveRoomId: paidOrder.liveRoomId,
       targetId: paidOrder.id,
       detail: { finalPrice: paidOrder.finalPrice }
     });
-    broadcastAuctionEvent(snapshot.auction.liveRoomId, "order:paid", snapshot);
+    broadcastAuctionEvent(paidOrder.liveRoomId, "order:paid", {
+      ok: true,
+      order: paidOrder,
+      snapshot
+    });
     res.json({
       ...paidOrder,
       ok: true,

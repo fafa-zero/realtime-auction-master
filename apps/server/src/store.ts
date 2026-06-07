@@ -287,7 +287,7 @@ export function getOrders(liveRoomId?: string) {
   }
 
   return [...orderMap.values()]
-    .filter((item) => !liveRoomId || getOrderLiveRoomId(item) === liveRoomId)
+    .filter((item) => !liveRoomId || item.liveRoomId === liveRoomId)
     .map((item) => ({ ...item }));
 }
 
@@ -804,13 +804,14 @@ export function updateAuctionProduct(
   const product = requireProduct(productId);
   const auction = requireAuctionForProduct(liveRoomId, productId);
 
-  if (auction.status === "ACTIVE") {
-    throw new Error("竞拍中的商品不能编辑");
+  if (auction.status !== "PENDING") {
+    throw new Error("已开始或已结束的商品不能编辑，请新增商品重新配置");
   }
 
   const merged = normalizeProductImportRow({
     name: input.name ?? product.name,
     description: input.description ?? product.description,
+    imageUrl: input.imageUrl !== undefined ? input.imageUrl : product.imageUrl,
     startPrice: input.startPrice ?? product.startPrice ?? auction.startPrice,
     incrementStep: input.incrementStep ?? product.incrementStep ?? auction.incrementStep,
     ceilingPrice: input.ceilingPrice ?? product.ceilingPrice ?? auction.ceilingPrice,
@@ -822,7 +823,7 @@ export function updateAuctionProduct(
 
   product.name = merged.name;
   product.description = merged.description;
-  product.imageUrl = input.imageUrl !== undefined ? input.imageUrl.trim() : product.imageUrl;
+  product.imageUrl = merged.imageUrl ?? getDefaultProductImageUrl(merged.name, liveRoom.title);
   product.startPrice = merged.startPrice;
   product.incrementStep = merged.incrementStep;
   product.ceilingPrice = merged.ceilingPrice;
@@ -851,8 +852,8 @@ export function updateAuctionProduct(
 export function archiveAuctionProduct(liveRoomId: string, productId: string) {
   const auction = requireAuctionForProduct(liveRoomId, productId);
 
-  if (auction.status === "ACTIVE") {
-    throw new Error("竞拍中的商品不能下架");
+  if (auction.status !== "PENDING") {
+    throw new Error("已开始或已结束的商品不能下架");
   }
 
   setProductQueueStatus(productId, "CANCELLED");
@@ -992,7 +993,8 @@ export function placeBid(input: {
   const auction = requireAuctionForLiveRoom(liveRoomId);
   const now = Date.now();
 
-  const previousBid = processedBidRequestIds.get(input.clientRequestId);
+  const bidRequestKey = getBidRequestKey(auction.id, input.userId, input.clientRequestId);
+  const previousBid = processedBidRequestIds.get(bidRequestKey);
   if (previousBid) {
     return {
       bid: previousBid,
@@ -1048,7 +1050,7 @@ export function placeBid(input: {
   };
 
   bids.push(bid);
-  processedBidRequestIds.set(input.clientRequestId, bid);
+  processedBidRequestIds.set(bidRequestKey, bid);
 
   auction.currentPrice = input.price;
   auction.winnerUserId = input.userId;
@@ -1105,6 +1107,7 @@ export function settleAuction(liveRoomId = DEFAULT_LIVE_ROOM_ID) {
       orders.push({
         id: randomUUID(),
         auctionId: auction.id,
+        liveRoomId,
         productId: auction.productId,
         buyerUserId: auction.winnerUserId,
         buyerNickname: auction.winnerNickname,
@@ -1136,9 +1139,7 @@ export function payOrder(orderId: string) {
 
   if (order.status !== "PAID") {
     order.status = "PAID";
-    const auction = requireAuction(order.auctionId);
-    auction.version += 1;
-    archiveCurrentAuction(auction.liveRoomId);
+    syncHistoryOrder(order);
     saveState();
   }
 
@@ -1365,6 +1366,21 @@ function getCurrentOrder(auctionId: string) {
   return orders.find((item) => item.auctionId === auctionId && item.createdAt > startTime) ?? null;
 }
 
+function getCurrentSnapshotForOrder(order: Order) {
+  const liveRoom = liveRooms.find((room) => room.currentAuctionId === order.auctionId);
+
+  if (!liveRoom) {
+    return null;
+  }
+
+  const snapshot = getSnapshot(liveRoom.id);
+  return snapshot.order?.id === order.id ? snapshot : null;
+}
+
+export function getOrderSnapshot(orderId: string) {
+  return getCurrentSnapshotForOrder(getOrder(orderId));
+}
+
 function archiveCurrentAuction(liveRoomId: string) {
   const auction = requireAuctionForLiveRoom(liveRoomId);
 
@@ -1403,6 +1419,18 @@ function removeProcessedRequestsForAuction(auctionId: string) {
   for (const [requestId, bid] of processedBidRequestIds.entries()) {
     if (bid.auctionId === auctionId) {
       processedBidRequestIds.delete(requestId);
+    }
+  }
+}
+
+function getBidRequestKey(auctionId: string, userId: string, clientRequestId: string) {
+  return `${auctionId}:${userId}:${clientRequestId}`;
+}
+
+function syncHistoryOrder(order: Order) {
+  for (const item of history) {
+    if (item.order?.id === order.id) {
+      item.order = { ...order };
     }
   }
 }
@@ -1624,7 +1652,7 @@ function normalizeProductImportRow(row: ProductImportRow): ProductImportRow {
   return {
     name,
     description,
-    imageUrl: row.imageUrl?.trim(),
+    imageUrl: row.imageUrl?.trim() || undefined,
     startPrice: row.startPrice,
     incrementStep: row.incrementStep,
     ceilingPrice: row.ceilingPrice,
@@ -1829,13 +1857,15 @@ function applyPersistedState(data: Partial<PersistedAuctionState> & { auction?: 
   if (Array.isArray(data.auditLogs)) {
     auditLogs.splice(0, auditLogs.length, ...data.auditLogs.slice(0, AUDIT_LOG_LIMIT));
   }
+
+  ensureOrderLiveRoomIds();
 }
 
 function rebuildProcessedBidRequestIds() {
   processedBidRequestIds.clear();
 
   for (const bid of bids) {
-    processedBidRequestIds.set(bid.clientRequestId, bid);
+    processedBidRequestIds.set(getBidRequestKey(bid.auctionId, bid.userId, bid.clientRequestId), bid);
   }
 }
 
@@ -2030,6 +2060,10 @@ function requireProduct(productId: string) {
 }
 
 function getOrderLiveRoomId(order: Order) {
+  if (order.liveRoomId) {
+    return order.liveRoomId;
+  }
+
   const activeAuction = auctions.find((auction) => auction.id === order.auctionId);
 
   if (activeAuction) {
@@ -2038,6 +2072,18 @@ function getOrderLiveRoomId(order: Order) {
 
   const historyItem = history.find((item) => item.auction.id === order.auctionId);
   return historyItem?.auction.liveRoomId ?? null;
+}
+
+function ensureOrderLiveRoomIds() {
+  for (const order of orders) {
+    order.liveRoomId = getOrderLiveRoomId(order) ?? DEFAULT_LIVE_ROOM_ID;
+  }
+
+  for (const item of history) {
+    if (item.order) {
+      item.order.liveRoomId = item.order.liveRoomId || item.auction.liveRoomId;
+    }
+  }
 }
 
 function isKnownLiveRoom(value: string) {
