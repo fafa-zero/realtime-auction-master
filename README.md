@@ -1,108 +1,131 @@
 # 实时竞拍大师
 
-面向直播电商场景的实时竞拍 MVP。项目用于课程设计、毕业设计和本地演示，重点展示“主播开播配置商品、买家实时竞拍、弹幕互动、成交生成订单、AI 辅助讲解”的完整闭环。
+面向直播电商场景的实时竞拍全栈 Demo。项目模拟“主播配置商品并开拍、买家实时出价、弹幕互动、封顶成交、生成订单、模拟支付、AI 辅助讲解与复盘”的完整业务闭环，适合课程设计、毕业设计、比赛演示和本地功能展示。
 
-当前版本包含三端：
+远端仓库：
 
-- Web 主播端：创建直播间、管理竞拍、商品队列、订单、弹幕治理和 AI 助手。
-- Web 观众端：买家登录/注册、观看直播间、竞拍、发送弹幕、查看订单。
-- 微信小程序买家端：复用 Web 买家账号，进入同一直播间竞拍和发弹幕。
+```text
+https://github.com/fafa-zero/realtime-auction-master.git
+```
 
-> 说明：本项目是演示级原型。真实直播推流、真实微信登录、真实支付、生产数据库、Redis 高并发和完整风控属于后续工程化扩展。
+> 当前项目是演示级 MVP。真实直播推流、真实微信授权、真实支付、生产级风控、Redis 高并发竞价和完整数据库建模属于后续工程化扩展。
 
-## 功能亮点
+## 功能概览
 
-- 多直播间独立状态，弹幕、竞拍、订单按 `liveRoomId` 隔离。
-- Web 与小程序共用买家账号体系，小程序不再使用单独 mock openid 账号。
-- 主播新账号首次登录后先创建直播间，再进入主播控制台。
-- 主播端不能出价，买家出价统一从 Web 观众端或小程序端完成。
-- 竞拍支持起拍价、最低加价、封顶价、倒计时、成交/流拍/取消。
-- 达到封顶价自动成交，并生成模拟订单。
-- Web Socket.IO 实时同步竞拍和弹幕；小程序通过 `/miniprogram-ws` 实时同步，REST 轮询与 HTTP 提交接口作为兜底。
-- Socket.IO 在连接阶段校验 token，事件内使用服务端解析的用户身份，避免前端伪造买家信息。
-- 弹幕支持发送、历史列表、飞屏展示、限频、敏感词过滤、主播撤回和屏蔽用户。
-- 主播开拍、取消、商品管理、弹幕治理、出价、支付和登录限流会写入审计日志。
-- AI 助手支持商品讲解词、竞拍复盘、主播实时话术和异常出价提示；未配置模型时有本地兜底结果。
-- 本地 JSON 持久化，重启后保留用户、会话、直播间、竞拍、订单、弹幕和审计日志。
+- 多直播间：直播间、商品、竞拍、订单、弹幕和审计日志按 `liveRoomId` 隔离。
+- 主播控制台：创建直播间、管理商品队列、开始/取消竞拍、查看出价、管理订单和治理弹幕。
+- 买家竞拍页：买家登录/注册、观看直播间、实时出价、发送弹幕、查看并支付自己的订单。
+- 微信小程序：复用 Web 买家账号体系，支持进入同一直播间参与竞拍、发弹幕和查看订单。
+- 竞拍状态机：支持 `PENDING`、`ACTIVE`、`SOLD`、`UNSOLD`、`CANCELLED` 状态流转。
+- 出价规则：支持起拍价、最低加价、封顶价、倒计时、最后阶段自动延时和封顶自动成交。
+- 实时同步：Web 使用 Socket.IO；小程序使用 `/miniprogram-ws`，并保留 REST 请求作为兜底。
+- 权限控制：主播不能代替买家出价；Socket 连接使用 token 校验，服务端按登录态识别用户身份。
+- 弹幕治理：支持弹幕历史、飞屏展示、限频、敏感词过滤、撤回弹幕和屏蔽用户。
+- 审计日志：记录开拍、取消、商品管理、出价、支付、弹幕治理、演示重置和登录限流等关键动作。
+- AI 助手：支持商品讲解词、竞拍复盘、主播实时话术和异常出价提示；未配置模型时使用本地兜底内容。
+- 持久化：默认使用本地 JSON；可切换到 MySQL，MySQL 不可用时仍能保留 JSON 演示兜底。
 
 ## 技术栈
 
-- Web：React + TypeScript + Vite
-- Server：Node.js + Express + Socket.IO + ws + Zod
+- Web：React 18、TypeScript、Vite、Socket.IO Client、Lucide React
+- Server：Node.js、Express、Socket.IO、ws、Zod、TypeScript
 - 小程序：微信小程序原生 WXML / WXSS / JS
-- 数据：本地 JSON 文件持久化
-- AI：兼容 OpenAI Chat Completions 风格的接口，可本地兜底
+- 数据：本地 JSON 文件或 MySQL
+- AI：兼容 OpenAI Chat Completions 风格的模型接口，可本地兜底
 
 ## 项目结构
 
 ```text
 realtime-auction-master
 ├── apps
-│   ├── server        后端 API、Socket.IO、数据持久化
-│   ├── web           Web 主播端与观众端
+│   ├── server        后端 API、实时通信、竞拍状态机、持久化
+│   ├── web           Web 主播端和 Web 买家端
 │   └── miniprogram   微信小程序买家端
-├── docs              需求、计划、测试和功能更新文档
+├── data              本地 JSON 演示状态
+├── docs              API、测试用例、演示材料和升级计划
+├── package.json      npm workspace 脚本
 └── README.md
 ```
 
+## 环境要求
+
+- Node.js 18 或更高版本
+- npm
+- 现代浏览器，推荐 Chrome 或 Edge
+- 微信开发者工具，小程序联调时需要
+- MySQL，可选，仅在需要 MySQL 持久化时使用
+
 ## 快速开始
 
-安装依赖：
+进入项目并安装依赖：
 
 ```bash
+cd /home/zyy/realtime-auction-master
 npm install
 ```
 
-推荐使用单端口稳定演示模式。Web、API、Socket.IO 和静态资源都由后端托管在 `4300`：
+推荐使用单端口稳定演示模式：
 
 ```bash
 npm run demo
 ```
 
-该命令会先构建 Web 和后端，恢复标准演示数据，再用 `PORT=4300 CLIENT_URL=http://localhost:4300` 启动后端。
+该命令会依次完成 Web 构建、Server 构建、演示数据重置，并以 `4300` 端口启动后端。后端会同时托管 API、Socket.IO、静态图片和前端页面。
 
-打开：
+访问地址：
 
-- 首页：`http://localhost:4300/`
-- Web 主播端：`http://localhost:4300/host`
-- Web 观众端：`http://localhost:4300/live/live-1`
-- 主播创建直播间：`http://localhost:4300/host/setup`
+```text
+首页：http://localhost:4300/
+主播端：http://localhost:4300/host
+主播创建直播间：http://localhost:4300/host/setup
+Web 买家端：http://localhost:4300/live/live-1
+健康检查：http://localhost:4300/api/health
+演示检查：http://localhost:4300/api/demo/check
+```
 
-也可以使用开发模式：
+开发模式：
 
 ```bash
 npm run dev
 ```
 
-开发模式会分别启动后端和 Vite。若端口被占用，Vite 可能自动切换端口；演示时优先使用上面的 `4300` 单端口模式。
+开发模式会同时启动后端和 Vite 前端。Vite 端口可能在被占用时自动变化；正式演示建议优先使用 `npm run demo` 的 `4300` 单端口模式。
 
 ## 演示账号
-
-Web 内置演示账号：
 
 | 角色 | 账号 | 密码 |
 | --- | --- | --- |
 | 商家/主播 | `demo-host` | `demo123` |
 | 买家 | `demo-buyer` | `demo123` |
 
-也可以直接注册新账号：
+演示数据包含两个默认直播间：
 
-- Web 观众端注册买家账号后，可以在小程序使用同一账号登录。
-- Web 主播端注册商家账号需要填写 `HOST_INVITE_CODE` 对应的邀请码，注册后会进入创建直播间流程。
+| 直播间 ID | 名称 | 图片资源 |
+| --- | --- | --- |
+| `live-1` | 珠宝严选好物专场 | `/static/jewelry.jpg` |
+| `live-2` | 腕表收藏好物专场 | `/static/watch.jpg` |
 
-## 稳定演示状态
+恢复标准演示数据：
 
-本仓库当前已整理为稳定本地演示版本：
+```bash
+npm run demo:reset
+```
 
-- `demo-host / demo123` 默认拥有两个标准直播间：`live-1` 珠宝严选好物专场、`live-2` 腕表收藏好物专场。
-- 标准商品图片使用本地静态资源 `/static/jewelry.jpg` 和 `/static/watch.jpg`，不依赖外网图片。
-- 主播端商品管理区提供“重置演示数据”按钮，可恢复标准直播间、商品、竞拍、订单、弹幕、用户和会话。
-- 也可以在命令行执行 `npm run demo:reset` 恢复标准演示数据。
-- 重置后建议重新使用 `demo-host / demo123` 和 `demo-buyer / demo123` 登录演示。
-- 演示健康检查接口：`http://localhost:4300/api/demo/check`，可检查 API、演示账号、标准直播间、本地图片和小程序地址提示。
-- 商品导入模板 `docs/product-import-template.csv` 已包含“商品图片”列，可填写 `/static/jewelry.jpg`、`/static/watch.jpg` 或网络图片 URL。
+重置后建议重新使用 `demo-host / demo123` 和 `demo-buyer / demo123` 登录。
 
-## 微信小程序
+## Web 使用流程
+
+1. 启动 `npm run demo`。
+2. 打开 `http://localhost:4300/host`，用 `demo-host / demo123` 登录。
+3. 进入直播间后选择商品并开始竞拍。
+4. 另开窗口访问 `http://localhost:4300/live/live-1`，用 `demo-buyer / demo123` 登录。
+5. 买家提交有效出价，主播端和买家端会实时同步最高价、倒计时、领先用户和出价记录。
+6. 买家发送弹幕，主播端可查看、撤回或屏蔽用户。
+7. 出价达到封顶价后自动成交并生成待支付订单。
+8. 成交买家点击模拟支付，订单状态更新为已支付。
+9. 主播端可调用 AI 助手生成商品讲解词、竞拍复盘、主播话术或异常出价提示。
+
+## 微信小程序联调
 
 用微信开发者工具打开：
 
@@ -110,13 +133,13 @@ Web 内置演示账号：
 apps/miniprogram
 ```
 
-本地联调建议：
+本地联调步骤：
 
-1. 先启动 `http://localhost:4300` 单端口服务。
+1. 先启动 `npm run demo`，确保 `http://localhost:4300` 可访问。
 2. 微信开发者工具打开 `apps/miniprogram`。
 3. 开启“不校验合法域名、web-view、TLS 版本以及 HTTPS 证书”。
-4. 在小程序首页用 Web 买家账号登录，或注册新的买家账号。
-5. 进入直播间后可竞拍、发送弹幕、查看订单。
+4. 在小程序首页使用 Web 买家账号登录，或注册新的买家账号。
+5. 进入直播间后参与竞拍、发送弹幕、查看订单并模拟支付。
 
 小程序默认依次尝试：
 
@@ -125,80 +148,77 @@ http://localhost:4300
 http://127.0.0.1:4300
 ```
 
-小程序账号说明：
+Web 页面和小程序必须连接同一个后端实例，才能共享同一套竞拍状态。
 
-- 注册调用 `/api/auth/web/register`，固定创建 `BUYER` 账号。
-- 登录调用 `/api/auth/web/login`。
-- 出价和弹幕请求会携带登录 token，服务端使用当前买家身份写入出价和弹幕。
+## 常用脚本
 
-## 主要页面
+| 命令 | 说明 |
+| --- | --- |
+| `npm run demo` | 构建前后端、重置演示数据并启动 `4300` 单端口服务 |
+| `npm run demo:reset` | 构建后端并恢复标准演示数据 |
+| `npm run dev` | 同时启动 Server 和 Web 开发服务 |
+| `npm run build` | 构建全部 workspace |
+| `npm run typecheck` | 对全部 workspace 执行 TypeScript 类型检查 |
+| `npm run test:state-machine` | 执行后端竞拍状态机测试 |
+| `npm --workspace apps/server run test:integration` | 执行后端集成测试 |
 
-Web：
+提交前建议至少运行：
 
-- `/`：入口页。
-- `/host`：主播控制台。
-- `/host/setup`：新主播创建直播间。
-- `/live/:liveRoomId`：Web 观众竞拍页。
-
-小程序：
-
-- `pages/index`：买家账号入口和直播间列表。
-- `pages/live/index`：观看直播间、竞拍、弹幕、模拟支付。
-- `pages/orders/index`：我的订单。
+```bash
+npm run typecheck
+npm run build
+```
 
 ## 环境变量
 
-后端：
+可参考 `.env.example`：
 
 ```bash
 PORT=4300
 CLIENT_URL=http://localhost:4300
 AUCTION_DATA_FILE=data/auction-state.json
 AUCTION_STORAGE=json
+
 DATABASE_URL=
 MYSQL_HOST=127.0.0.1
 MYSQL_PORT=3306
 MYSQL_USER=root
 MYSQL_PASSWORD=
 MYSQL_DATABASE=realtime_auction
+MYSQL_CONNECTION_LIMIT=10
+
 HOST_INVITE_CODE=
 MAX_UPLOAD_BYTES=2097152
+
 AI_API_URL=
 AI_API_KEY=
 AI_MODEL=
+
+WECHAT_MINIPROGRAM_APPID=
+WECHAT_MINIPROGRAM_SECRET=
 ```
 
-说明：
+关键说明：
 
-- `PORT`：后端端口。
-- `CLIENT_URL`：允许跨域的 Web 地址。
-- `AUCTION_STORAGE`：设置为 `mysql` 时启用 MySQL 持久化；未配置时使用本地 JSON。
+- `PORT`：后端服务端口。
+- `CLIENT_URL`：允许跨域访问的 Web 地址。
+- `AUCTION_DATA_FILE`：本地 JSON 状态文件路径。
+- `AUCTION_STORAGE`：设为 `mysql` 时启用 MySQL 持久化；默认使用 JSON。
 - `DATABASE_URL`：MySQL 连接字符串，优先级高于拆分的 `MYSQL_*` 配置。
-- `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DATABASE`：MySQL 连接配置。
-- `AUCTION_DATA_FILE`：JSON 兜底状态文件路径；MySQL 不可用时仍可保证本地演示。
-- `HOST_INVITE_CODE`：主播注册邀请码；未配置时只能使用已有主播账号，不能公开注册新主播。
-- `MAX_UPLOAD_BYTES`：商品模板上传大小上限，默认 2MB。
-- `AI_API_URL` / `AI_API_KEY` / `AI_MODEL`：可选 AI 模型配置。
-
-未配置 AI 时，系统会使用本地兜底生成讲解词、复盘和风险提示，保证演示不中断。
+- `HOST_INVITE_CODE`：主播注册邀请码。未配置时不允许公开注册新主播，但内置演示主播可用。
+- `MAX_UPLOAD_BYTES`：商品导入文件大小上限，默认 2MB。
+- `AI_API_URL` / `AI_API_KEY` / `AI_MODEL`：可选 AI 模型配置；未配置时使用本地兜底。
+- `WECHAT_MINIPROGRAM_APPID` / `WECHAT_MINIPROGRAM_SECRET`：预留给真实微信小程序登录。
 
 ## MySQL 持久化
 
-毕设成品建议使用 MySQL。项目支持 MySQL 优先、JSON 兜底：
-
-1. 安装 MySQL 驱动：
-
-```bash
-npm install mysql2 --workspace apps/server
-```
-
-2. 初始化数据库：
+默认 JSON 已满足本地演示。需要 MySQL 时执行：
 
 ```bash
 mysql -u root -p < apps/server/db/mysql-schema.sql
 ```
 
-3. 启动时启用 MySQL：
+启动时启用 MySQL：
 
 ```bash
 AUCTION_STORAGE=mysql \
@@ -218,121 +238,119 @@ npm --workspace apps/server run start
 DATABASE_URL=mysql://root:your_password@127.0.0.1:3306/realtime_auction
 ```
 
-当前 MySQL 表按业务实体拆分为直播间、用户、会话、商品、竞拍、出价、订单、历史、弹幕、屏蔽用户和审计日志表。每张表用 `entity_key + data_json` 保存实体快照，适合演示阶段稳定迁移；后续可继续拆成完全范式化字段表。
+当前 MySQL 表按业务实体拆分为直播间、用户、会话、商品、竞拍、出价、订单、历史、弹幕、屏蔽用户和审计日志表。每张表用 `entity_key + data_json` 保存实体快照，便于演示阶段稳定迁移；后续可继续拆成更细的范式化字段表。
 
 ## 核心接口
 
-详细请求/响应和权限说明见 [docs/api-reference.md](docs/api-reference.md)。
+详细接口见 [docs/api-reference.md](docs/api-reference.md)。需要登录的 REST 接口统一使用：
 
-账号：
-
-- `POST /api/auth/web/register`：注册 Web/小程序共用账号。
-- `POST /api/auth/web/login`：账号密码登录。
-- `POST /api/auth/logout`：注销当前 token。
-- `GET /api/me`：获取当前登录用户。
-- `GET /api/me/live-rooms`：获取当前主播拥有的直播间。
-- `GET /api/me/orders`：获取当前买家订单。
-
-直播间：
-
-- `GET /api/live-rooms`：直播间列表。
-- `GET /api/live-rooms/:liveRoomId`：直播间详情。
-- `POST /api/live-rooms`：创建主播直播间。
-
-竞拍：
-
-- `GET /api/live-rooms/:liveRoomId/auction`：获取竞拍快照。
-- `POST /api/live-rooms/:liveRoomId/auction/start`：开始竞拍。
-- `POST /api/live-rooms/:liveRoomId/auction/cancel`：取消竞拍。
-- `POST /api/live-rooms/:liveRoomId/auction/bids`：提交出价。
-- `POST /api/orders/:orderId/pay`：模拟支付。
-
-商品和 AI：
-
-- `GET /api/live-rooms/:liveRoomId/products`：商品队列。
-- `POST /api/live-rooms/:liveRoomId/products/import`：导入商品。
-- `POST /api/live-rooms/:liveRoomId/products/:productId/start`：从队列选择商品开拍。
-- `POST /api/ai/product-script`：生成商品讲解词。
-- `POST /api/ai/auction-summary`：生成竞拍复盘。
-- `POST /api/ai/host-cue`：生成主播实时话术。
-- `POST /api/ai/bid-risk`：生成异常出价提示。
-
-弹幕：
-
-- `GET /api/live-rooms/:liveRoomId/danmaku`：弹幕历史。
-- `POST /api/live-rooms/:liveRoomId/danmaku`：发送弹幕。
-- `POST /api/live-rooms/:liveRoomId/danmaku/:messageId/retract`：撤回弹幕。
-- `POST /api/live-rooms/:liveRoomId/danmaku/block-user`：屏蔽弹幕用户。
-
-审计：
-
-- `GET /api/live-rooms/:liveRoomId/audit-logs`：查询最近 20 条审计日志，仅房主主播或管理员可访问。
-
-Socket.IO：
-
-连接时通过 `auth.token` 传入登录 token；未登录或 token 失效的连接会被拒绝。
-
-- `auction:snapshot`
-- `auction:join`
-- `auction:bid`
-- `auction:bid-success`
-- `auction:extended`
-- `auction:ended`
-- `order:paid`
-- `danmaku:history`
-- `danmaku:send`
-- `danmaku:new`
-- `danmaku:retracted`
-- `danmaku:user-blocked`
-
-## 演示流程
-
-1. 启动 `4300` 单端口服务。
-2. 打开 `/host`，使用 `demo-host / demo123` 登录，或注册新的主播账号。
-3. 新主播先创建直播间，填写直播间名称、主播名称和首件商品信息。
-4. 主播端开始竞拍。
-5. 打开 `/live/live-1` 或小程序首页，使用买家账号登录。
-6. 买家提交出价，主播端和观众端同步当前价格和出价记录。
-7. 买家发送弹幕，Web 和小程序同直播间可查看弹幕。
-8. 出价达到封顶价后自动成交，并生成模拟订单。
-9. 买家模拟支付，订单状态更新。
-10. 主播使用 AI 助手生成讲解词、复盘或风险提示。
-
-## 验证命令
-
-提交前建议执行：
-
-```bash
-npm --workspaces run typecheck
-npm --workspaces run build
+```http
+Authorization: Bearer <token>
 ```
 
-常用冒烟检查：
+常用 REST 接口：
 
-```bash
-curl -I http://localhost:4300/live/live-1
-curl -I http://localhost:4300/host/setup
-curl http://localhost:4300/api/live-rooms
+| 模块 | 接口 |
+| --- | --- |
+| 健康检查 | `GET /api/health`、`GET /api/demo/check` |
+| 登录注册 | `POST /api/auth/web/register`、`POST /api/auth/web/login`、`POST /api/auth/logout`、`GET /api/me` |
+| 直播间 | `GET /api/live-rooms`、`GET /api/live-rooms/:liveRoomId`、`POST /api/live-rooms` |
+| 商品 | `GET /api/live-rooms/:liveRoomId/products`、`POST /api/live-rooms/:liveRoomId/products/import`、`POST /api/live-rooms/:liveRoomId/products/:productId/start` |
+| 竞拍 | `GET /api/live-rooms/:liveRoomId/auction`、`POST /api/live-rooms/:liveRoomId/auction/start`、`POST /api/live-rooms/:liveRoomId/auction/bids`、`POST /api/live-rooms/:liveRoomId/auction/cancel` |
+| 订单 | `GET /api/me/orders`、`GET /api/live-rooms/:liveRoomId/orders`、`POST /api/orders/:orderId/pay` |
+| 弹幕 | `GET /api/live-rooms/:liveRoomId/danmaku`、`POST /api/live-rooms/:liveRoomId/danmaku`、`POST /api/live-rooms/:liveRoomId/danmaku/:messageId/retract`、`POST /api/live-rooms/:liveRoomId/danmaku/block-user` |
+| 审计 | `GET /api/live-rooms/:liveRoomId/audit-logs` |
+| AI | `POST /api/ai/product-script`、`POST /api/ai/auction-summary`、`POST /api/ai/host-cue`、`POST /api/ai/bid-risk` |
+
+Socket.IO 连接示例：
+
+```ts
+io(API_URL, {
+  auth: { token },
+  transports: ["websocket", "polling"]
+});
 ```
 
-## 文档
+主要事件：
 
-- `docs/2026-05-31-danmaku-feature.md`：弹幕、治理、Web/小程序联调更新。
-- `docs/test-cases.md`：手工测试用例。
-- `docs/final-demo-submission.md`：最终提交材料整理。
-- `docs/live-auction-upgrade-requirements.md`：升级需求文档。
-- `apps/miniprogram/README.md`：小程序联调说明。
+```text
+auction:join
+auction:snapshot
+auction:bid
+auction:bid-success
+auction:extended
+auction:ended
+auction:cancelled
+order:paid
+danmaku:history
+danmaku:send
+danmaku:new
+danmaku:retracted
+danmaku:user-blocked
+```
 
-## Git 提交规则
+小程序 WebSocket 路径：
 
-- 一个小功能一个 commit。
-- 提交前运行 `npm --workspaces run typecheck`。
-- 必要时运行 `npm --workspaces run build`。
-- 只暂存本次相关文件，避免混入临时文件。
-- commit message 使用清楚前缀，例如：
-  - `server:`
-  - `web:`
-  - `miniprogram:`
-  - `docs:`
-  - `test:`
-  - `chore:`
+```text
+/miniprogram-ws
+```
+
+消息格式：
+
+```json
+{ "type": "auction:join", "payload": { "liveRoomId": "live-1" } }
+```
+
+## 商品导入
+
+商品导入模板：
+
+```text
+docs/product-import-template.csv
+```
+
+示例数据：
+
+```text
+docs/product-import-demo-top10.csv
+```
+
+商品图片字段可填写本地静态资源或网络图片：
+
+```text
+/static/jewelry.jpg
+/static/watch.jpg
+https://example.com/product.jpg
+```
+
+## 文档索引
+
+- [API Reference](docs/api-reference.md)：REST、Socket.IO 和小程序 WebSocket 接口说明。
+- [测试用例](docs/test-cases.md)：手工测试路径和验收要点。
+- [稳定本地访问方案](docs/stable-localhost.md)：WSL / 本地 `4300` 单端口演示说明。
+- [最终演示材料](docs/final-demo-submission.md)：比赛或课程提交材料整理。
+- [小程序说明](apps/miniprogram/README.md)：微信小程序本地联调和上线边界。
+
+## 生产化边界
+
+当前版本重点保证演示闭环清晰、功能可操作、状态可恢复。正式上线前建议补齐：
+
+- 接入真实直播流、商品库、库存系统和支付系统。
+- 使用 Redis Lua 或数据库事务保证多实例竞价原子性。
+- 使用消息队列和 WebSocket 广播集群支撑高并发。
+- 完善登录鉴权、风控策略、敏感词库、审计查询和后台权限。
+- 使用正式 HTTPS 域名、WSS 域名和微信小程序合法域名配置。
+- 将 MySQL 快照表逐步拆成更细粒度的业务字段和索引。
+
+## Git 提交流程
+
+本项目当前主分支为 `main`。提交前建议：
+
+```bash
+git status
+npm run typecheck
+npm run build
+git add README.md
+git commit -m "docs: rewrite readme"
+git push origin main
+```
