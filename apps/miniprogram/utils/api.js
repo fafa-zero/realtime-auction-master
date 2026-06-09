@@ -24,12 +24,12 @@ function getDefaultApiBaseUrl() {
 
 function getApiBaseUrlCandidates() {
   const current = getApiBaseUrl();
-  const candidates = [...API_BASE_URL_CANDIDATES, current].map(normalizeBaseUrl);
+  const candidates = [current, ...API_BASE_URL_CANDIDATES].map(normalizeBaseUrl);
   return candidates.filter((candidate, index) => candidates.indexOf(candidate) === index);
 }
 
-function getMiniprogramWsUrl() {
-  return `${getApiBaseUrl().replace(/^http/, "ws")}/miniprogram-ws`;
+function getMiniprogramWsUrl(apiBaseUrl) {
+  return `${normalizeBaseUrl(apiBaseUrl || getApiBaseUrl()).replace(/^http/, "ws")}/miniprogram-ws`;
 }
 
 function setApiBaseUrl(apiBaseUrl) {

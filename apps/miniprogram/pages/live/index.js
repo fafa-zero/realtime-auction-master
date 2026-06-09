@@ -1,5 +1,6 @@
 const {
   getApiBaseUrl,
+  getApiBaseUrlCandidates,
   getAuctionSnapshot,
   getDanmakuMessages,
   getLiveRoom,
@@ -7,7 +8,8 @@ const {
   getMyOrders,
   payOrder,
   placeBid,
-  sendDanmaku
+  sendDanmaku,
+  setApiBaseUrl
 } = require("../../utils/api");
 const { money, remaining, time } = require("../../utils/format");
 
@@ -325,21 +327,58 @@ Page({
     }
 
     this.closeRealtime();
-    this.setData({ realtimeText: `正在连接实时通道：${getApiBaseUrl()}` });
+    const baseUrls = getApiBaseUrlCandidates();
+    const attemptId = Date.now();
+    this.realtimeAttemptId = attemptId;
+    this.connectRealtimeCandidate(baseUrls, 0, attemptId);
+  },
+
+  connectRealtimeCandidate(baseUrls, index, attemptId) {
+    const baseUrl = baseUrls[index];
+
+    if (!baseUrl) {
+      this.usePollingRealtime();
+      return;
+    }
+
+    this.setData({ realtimeText: `正在连接实时通道：${baseUrl}` });
 
     const socket = wx.connectSocket({
-      url: getMiniprogramWsUrl()
+      url: getMiniprogramWsUrl(baseUrl)
     });
+    let opened = false;
     this.realtimeSocket = socket;
+
+    const tryNext = (message) => {
+      if (this.realtimeSocket !== socket || this.realtimeAttemptId !== attemptId) {
+        return;
+      }
+
+      this.realtimeConnected = false;
+      this.realtimeSocket = null;
+
+      if (index < baseUrls.length - 1) {
+        this.connectRealtimeCandidate(baseUrls, index + 1, attemptId);
+        return;
+      }
+
+      this.setData({
+        realtimeText: `实时通道不可用，轮询同步中：${getApiBaseUrl()}`,
+        debugText: message || "WebSocket 连接失败，已切换轮询"
+      });
+      this.usePollingRealtime();
+    };
 
     socket.onOpen(() => {
       if (this.realtimeSocket !== socket) {
         return;
       }
 
+      opened = true;
       this.realtimeConnected = true;
+      setApiBaseUrl(baseUrl);
       this.setData({
-        realtimeText: `WebSocket 实时同步中：${getApiBaseUrl()}`,
+        realtimeText: `WebSocket 实时同步中：${baseUrl}`,
         debugText: `实时通道已连接 ${time(Date.now())}`
       });
       this.sendRealtimeMessage("auction:join", { liveRoomId: this.data.liveRoomId });
@@ -358,6 +397,11 @@ Page({
         return;
       }
 
+      if (!opened) {
+        tryNext(error.errMsg || "WebSocket 连接异常");
+        return;
+      }
+
       this.realtimeConnected = false;
       this.setData({
         realtimeText: `实时通道异常，轮询同步中：${getApiBaseUrl()}`,
@@ -367,6 +411,11 @@ Page({
 
     socket.onClose(() => {
       if (this.realtimeSocket !== socket) {
+        return;
+      }
+
+      if (!opened) {
+        tryNext("WebSocket 连接关闭");
         return;
       }
 

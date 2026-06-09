@@ -1,6 +1,7 @@
 node_modules
 dist
 data
+output
 .gitdata-local
 .env
 .env.local
