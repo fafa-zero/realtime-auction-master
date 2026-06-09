@@ -224,6 +224,9 @@ MAX_UPLOAD_BYTES=2097152
 AI_API_URL=
 AI_API_KEY=
 AI_MODEL=
+DEEPSEEK_API_KEY=
+DEEPSEEK_API_URL=https://api.deepseek.com/chat/completions
+DEEPSEEK_MODEL=deepseek-v4-flash
 
 WECHAT_MINIPROGRAM_APPID=
 WECHAT_MINIPROGRAM_SECRET=
@@ -262,15 +265,28 @@ flowchart LR
 
 ## 11. 大模型 / AI 能力使用说明
 
-当前项目没有绑定某一家固定模型服务，后端提供兼容 Chat Completions 风格的调用封装，可通过环境变量接入 OpenAI、通义千问、豆包、DeepSeek 或其他兼容服务。
+当前项目已接入 DeepSeek，并保留兼容 Chat Completions 风格的通用模型配置。只配置 `DEEPSEEK_API_KEY` 时，后端默认调用 DeepSeek `https://api.deepseek.com/chat/completions` 和 `deepseek-v4-flash`；如果配置 `AI_API_URL` / `AI_API_KEY` / `AI_MODEL`，则使用通用模型配置。
 
 环境变量：
 
 ```bash
-AI_API_URL=https://api.example.com/v1/chat/completions
-AI_API_KEY=your_api_key
-AI_MODEL=your_model_name
+DEEPSEEK_API_KEY=your_deepseek_key
+DEEPSEEK_API_URL=https://api.deepseek.com/chat/completions
+DEEPSEEK_MODEL=deepseek-v4-flash
+
+# 可选：其他 OpenAI 兼容服务
+AI_API_URL=
+AI_API_KEY=
+AI_MODEL=
 ```
+
+也可以在仓库根目录创建 `.env`：
+
+```bash
+DEEPSEEK_API_KEY=your_deepseek_key
+```
+
+`.env` 已在 `.gitignore` 中忽略，不会提交到远端。配置后，主播端商品队列点击“重新生成讲解词”会优先调用 DeepSeek 自动生成商品讲解词。
 
 系统中的 AI 位置：
 
@@ -278,7 +294,7 @@ AI_MODEL=your_model_name
 主播点击 AI 功能
 → Web 前端请求后端 AI 接口
 → 后端组装商品、竞拍、出价或用户行为上下文
-→ 调用兼容 Chat Completions 的模型 API
+→ 调用 DeepSeek 或其他兼容 Chat Completions 的模型 API
 → 成功时返回模型结果，失败或未配置时返回本地兜底内容
 → 前端展示给主播作为运营参考
 ```

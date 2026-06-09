@@ -193,6 +193,9 @@ MAX_UPLOAD_BYTES=2097152
 AI_API_URL=
 AI_API_KEY=
 AI_MODEL=
+DEEPSEEK_API_KEY=
+DEEPSEEK_API_URL=https://api.deepseek.com/chat/completions
+DEEPSEEK_MODEL=deepseek-v4-flash
 
 WECHAT_MINIPROGRAM_APPID=
 WECHAT_MINIPROGRAM_SECRET=
@@ -207,8 +210,30 @@ WECHAT_MINIPROGRAM_SECRET=
 - `DATABASE_URL`：MySQL 连接字符串，优先级高于拆分的 `MYSQL_*` 配置。
 - `HOST_INVITE_CODE`：主播注册邀请码。未配置时不允许公开注册新主播，但内置演示主播可用。
 - `MAX_UPLOAD_BYTES`：商品导入文件大小上限，默认 2MB。
-- `AI_API_URL` / `AI_API_KEY` / `AI_MODEL`：可选 AI 模型配置；未配置时使用本地兜底。
+- `DEEPSEEK_API_KEY`：DeepSeek API Key；配置后商品讲解词、主播话术、竞拍复盘和异常出价提示会优先调用 DeepSeek。
+- `DEEPSEEK_API_URL` / `DEEPSEEK_MODEL`：DeepSeek 接口地址和模型，默认分别为 `https://api.deepseek.com/chat/completions` 和 `deepseek-v4-flash`。
+- `AI_API_URL` / `AI_API_KEY` / `AI_MODEL`：通用 OpenAI 兼容模型配置；优先级高于 DeepSeek 默认配置，未配置 key 时使用本地兜底。
 - `WECHAT_MINIPROGRAM_APPID` / `WECHAT_MINIPROGRAM_SECRET`：预留给真实微信小程序登录。
+
+DeepSeek 启动示例：
+
+```bash
+DEEPSEEK_API_KEY=your_deepseek_key npm run demo
+```
+
+也可以在仓库根目录创建 `.env`，该文件已被 `.gitignore` 忽略，不会提交到远端：
+
+```bash
+DEEPSEEK_API_KEY=your_deepseek_key
+```
+
+然后直接运行：
+
+```bash
+npm run demo
+```
+
+主播端商品队列点击“重新生成讲解词”后，会自动调用 DeepSeek 生成商品讲解词；如果模型调用失败，系统会回退到本地兜底文案。
 
 ## MySQL 持久化
 
