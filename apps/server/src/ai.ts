@@ -10,6 +10,8 @@ export interface AiResult {
 
 const DEFAULT_DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
 const DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-flash";
+const DEFAULT_USTC_LLM_API_URL = "https://api.llm.ustc.edu.cn/v1/chat/completions";
+const DEFAULT_USTC_LLM_MODEL = "deepseek-v4-flash-ascend";
 
 export async function completeWithModel(input: {
   title: string;
@@ -20,7 +22,7 @@ export async function completeWithModel(input: {
   const config = getModelConfig();
 
   if (!config.apiKey) {
-    return createFallback(input.title, input.fallbackContent, "未配置 DeepSeek/API Key，已使用本地兜底策略");
+    return createFallback(input.title, input.fallbackContent, "未配置模型 API Key，已使用本地兜底策略");
   }
 
   const controller = new AbortController();
@@ -43,10 +45,11 @@ export async function completeWithModel(input: {
     }
 
     const data = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
+      choices?: Array<{ message?: { content?: string; reasoning_content?: string } }>;
       output_text?: string;
     };
-    const content = data.choices?.[0]?.message?.content?.trim() ?? data.output_text?.trim();
+    const message = data.choices?.[0]?.message;
+    const content = message?.content?.trim() ?? message?.reasoning_content?.trim() ?? data.output_text?.trim();
 
     if (!content) {
       return createFallback(input.title, input.fallbackContent, "模型返回内容为空，已使用本地兜底策略");
@@ -69,17 +72,52 @@ export async function completeWithModel(input: {
 }
 
 function getModelConfig() {
-  const apiKey = process.env.AI_API_KEY || process.env.DEEPSEEK_API_KEY || "";
-  const apiUrl = process.env.AI_API_URL || process.env.DEEPSEEK_API_URL || DEFAULT_DEEPSEEK_API_URL;
-  const model = process.env.AI_MODEL || process.env.DEEPSEEK_MODEL || DEFAULT_DEEPSEEK_MODEL;
+  const provider = getConfiguredProvider();
+  const apiKey = provider.apiKey;
+  const apiUrl = provider.apiUrl;
+  const model = provider.model;
   const isDeepSeek = apiUrl.includes("api.deepseek.com") || model.startsWith("deepseek-");
+  const isUstcLlm = apiUrl.includes("api.llm.ustc.edu.cn");
 
   return {
     apiKey,
     apiUrl,
     model,
     isDeepSeek,
-    providerName: isDeepSeek ? "DeepSeek" : "模型"
+    isUstcLlm,
+    providerName: isUstcLlm ? "USTC LLM" : isDeepSeek ? "DeepSeek" : "模型"
+  };
+}
+
+function getConfiguredProvider() {
+  if (process.env.AI_API_KEY) {
+    return {
+      apiKey: process.env.AI_API_KEY,
+      apiUrl: process.env.AI_API_URL || DEFAULT_DEEPSEEK_API_URL,
+      model: process.env.AI_MODEL || DEFAULT_DEEPSEEK_MODEL
+    };
+  }
+
+  if (process.env.USTC_LLM_API_KEY) {
+    return {
+      apiKey: process.env.USTC_LLM_API_KEY,
+      apiUrl: process.env.USTC_LLM_API_URL || DEFAULT_USTC_LLM_API_URL,
+      model: process.env.USTC_LLM_MODEL || DEFAULT_USTC_LLM_MODEL
+    };
+  }
+
+  if (process.env.DEEPSEEK_API_KEY) {
+    return {
+      apiKey: process.env.DEEPSEEK_API_KEY,
+      apiUrl: process.env.DEEPSEEK_API_URL || DEFAULT_DEEPSEEK_API_URL,
+      model: process.env.DEEPSEEK_MODEL || DEFAULT_DEEPSEEK_MODEL
+    };
+  }
+
+  return {
+    apiKey: "",
+    apiUrl: process.env.AI_API_URL || process.env.USTC_LLM_API_URL || process.env.DEEPSEEK_API_URL || DEFAULT_DEEPSEEK_API_URL,
+    model: process.env.AI_MODEL || process.env.USTC_LLM_MODEL || process.env.DEEPSEEK_MODEL || DEFAULT_DEEPSEEK_MODEL
   };
 }
 
@@ -98,7 +136,7 @@ function getRequestBody(
     ],
     temperature: 0.4,
     max_tokens: 300,
-    ...(config.isDeepSeek ? { thinking: { type: "disabled" } } : {})
+    ...(config.isDeepSeek || config.isUstcLlm ? { thinking: { type: "disabled" } } : {})
   };
 }
 

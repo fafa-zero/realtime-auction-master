@@ -16,7 +16,7 @@
 | 存储 | MySQL 优先，JSON 兜底；默认本地 JSON 文件 `apps/server/data/auction-state.json` |
 | 浏览器 | Chrome / Edge |
 | 微信开发者工具 | 本地联调时开启“不校验合法域名、web-view、TLS 版本以及 HTTPS 证书” |
-| AI | 未配置模型时使用本地兜底；配置 `AI_API_URL`、`AI_API_KEY`、`AI_MODEL` 后调用兼容 Chat Completions 的模型 API |
+| AI | 可配置 `USTC_LLM_API_KEY` 调用中科大 LLM 网关；`AI_API_URL` / `AI_API_KEY` / `AI_MODEL` 可覆盖为其他兼容 Chat Completions 的模型 API；未配置或失败时使用本地兜底 |
 
 ## 执行前检查
 
@@ -104,6 +104,7 @@
 | 编号 | 场景 | 操作步骤 | 预期结果 | 状态 |
 | --- | --- | --- | --- | --- |
 | AI-01 | 商品讲解词 | 点击“生成讲解词” | 返回 `ok: true`、标题、内容、生成时间和来源 | 待执行 |
+| AI-01A | 中科大 LLM 网关连通性 | 配置 `USTC_LLM_API_KEY` 后，主播登录并点击“生成讲解词” | 返回 `source: "model"`、`fallback: false`、`message: "USTC LLM 生成成功"` | 通过 |
 | AI-02 | 竞拍复盘 | 完成若干出价后点击“生成复盘” | 返回参与人数、出价次数、成交状态相关总结 | 待执行 |
 | AI-03 | 异常出价提示 | 输入接近或达到封顶价的价格，点击“风险提示” | 返回风险等级和原因 | 待执行 |
 | AI-04 | 未配置模型兜底 | 不配置 AI 环境变量，执行三个 AI 功能 | 返回 `source: "fallback"`、`fallback: true`，演示不中断 | 待执行 |

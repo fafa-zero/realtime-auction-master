@@ -72,7 +72,7 @@
    买家可发送弹幕，主播可撤回弹幕或屏蔽用户；封顶成交后自动生成订单，成交买家可以模拟支付。
 
 6. AI 竞拍助手
-   系统支持商品讲解词、主播实时话术、竞拍复盘和异常出价提示；未配置模型 API 时使用本地兜底结果。
+   系统支持商品讲解词、主播实时话术、竞拍复盘和异常出价提示；当前已接入中科大 LLM 网关，未配置模型 API 或模型调用失败时使用本地兜底结果。
 
 ## 5. 端到端使用流程
 
@@ -122,7 +122,7 @@
 在倒计时最后阶段出现有效出价时，系统会自动延长竞拍时间，避免最后一秒抢拍带来的不公平。
 当出价达到封顶价时，后端状态机会立即成交并生成模拟订单，成交买家可以完成模拟支付。
 项目还提供弹幕互动和治理能力，主播可以撤回弹幕或屏蔽用户。
-最后展示 AI 竞拍助手，它可以生成商品讲解词、主播实时话术、竞拍复盘和异常出价提示。即使没有配置模型 API，系统也会使用本地兜底结果保证演示不中断。
+最后展示 AI 竞拍助手，它可以通过中科大 LLM 网关生成商品讲解词、主播实时话术、竞拍复盘和异常出价提示。即使没有配置模型 API，系统也会使用本地兜底结果保证演示不中断。
 ```
 
 ## 8. 源代码仓库链接
@@ -224,6 +224,9 @@ MAX_UPLOAD_BYTES=2097152
 AI_API_URL=
 AI_API_KEY=
 AI_MODEL=
+USTC_LLM_API_KEY=
+USTC_LLM_API_URL=https://api.llm.ustc.edu.cn/v1/chat/completions
+USTC_LLM_MODEL=deepseek-v4-flash-ascend
 DEEPSEEK_API_KEY=
 DEEPSEEK_API_URL=https://api.deepseek.com/chat/completions
 DEEPSEEK_MODEL=deepseek-v4-flash
@@ -265,11 +268,16 @@ flowchart LR
 
 ## 11. 大模型 / AI 能力使用说明
 
-当前项目已接入 DeepSeek，并保留兼容 Chat Completions 风格的通用模型配置。只配置 `DEEPSEEK_API_KEY` 时，后端默认调用 DeepSeek `https://api.deepseek.com/chat/completions` 和 `deepseek-v4-flash`；如果配置 `AI_API_URL` / `AI_API_KEY` / `AI_MODEL`，则使用通用模型配置。
+当前项目已接入中科大 LLM 网关，并保留兼容 Chat Completions 风格的通用模型配置。只配置 `USTC_LLM_API_KEY` 时，后端默认调用 `https://api.llm.ustc.edu.cn/v1/chat/completions` 和 `deepseek-v4-flash-ascend`；如果配置 `AI_API_URL` / `AI_API_KEY` / `AI_MODEL`，则使用通用模型配置。
 
 环境变量：
 
 ```bash
+USTC_LLM_API_KEY=your_ustc_llm_key
+USTC_LLM_API_URL=https://api.llm.ustc.edu.cn/v1/chat/completions
+USTC_LLM_MODEL=deepseek-v4-flash-ascend
+
+# 可选：DeepSeek 官方服务
 DEEPSEEK_API_KEY=your_deepseek_key
 DEEPSEEK_API_URL=https://api.deepseek.com/chat/completions
 DEEPSEEK_MODEL=deepseek-v4-flash
@@ -283,10 +291,10 @@ AI_MODEL=
 也可以在仓库根目录创建 `.env`：
 
 ```bash
-DEEPSEEK_API_KEY=your_deepseek_key
+USTC_LLM_API_KEY=your_ustc_llm_key
 ```
 
-`.env` 已在 `.gitignore` 中忽略，不会提交到远端。配置后，主播端商品队列点击“重新生成讲解词”会优先调用 DeepSeek 自动生成商品讲解词。
+`.env` 已在 `.gitignore` 中忽略，不会提交到远端。配置后，主播端商品队列点击“重新生成讲解词”会优先调用中科大 LLM 网关自动生成商品讲解词。
 
 系统中的 AI 位置：
 
@@ -294,7 +302,7 @@ DEEPSEEK_API_KEY=your_deepseek_key
 主播点击 AI 功能
 → Web 前端请求后端 AI 接口
 → 后端组装商品、竞拍、出价或用户行为上下文
-→ 调用 DeepSeek 或其他兼容 Chat Completions 的模型 API
+→ 调用中科大 LLM 网关或其他兼容 Chat Completions 的模型 API
 → 成功时返回模型结果，失败或未配置时返回本地兜底内容
 → 前端展示给主播作为运营参考
 ```
@@ -363,7 +371,7 @@ npm run test:state-machine
 | 运行模式 | 单机 Node.js 进程 |
 | 实时通信 | Socket.IO + ws |
 | 数据存储 | 默认 JSON，可选 MySQL |
-| AI 调用 | 支持外部模型；未配置时本地兜底 |
+| AI 调用 | 已验证中科大 LLM 网关；未配置或调用失败时本地兜底 |
 | 并发能力 | 适合本地演示和答辩；生产高并发需要 Redis、队列和事务存储 |
 | 支付 | 模拟支付，不接真实支付渠道 |
 | 直播流 | 当前为商品画面和直播间模拟，不接真实直播推流 |
@@ -382,9 +390,11 @@ npm run test:state-machine
 | 开始竞拍延迟 | `POST /api/live-rooms/live-1/auction/start` | 4.91 ms |
 | 买家出价延迟 | `POST /api/live-rooms/live-1/auction/bids` | 3.67 ms |
 | 弹幕发送延迟 | `POST /api/live-rooms/live-1/danmaku` | 4.83 ms |
+| AI 模型连通性 | 登录 `demo-host` 后调用 `POST /api/ai/product-script`，配置 `USTC_LLM_API_KEY` | 通过，返回 `source: "model"`、`message: "USTC LLM 生成成功"` |
+| AI 模型生成结果 | 中科大 LLM 网关商品讲解词 | 返回中文直播口播文案，包含商品、起拍价、最低加价、封顶价和竞拍时长 |
 | AI 兜底调用延迟 | `POST /api/ai/bid-risk`，未配置模型 API | 3.33 ms |
-| 模型调用成本 | 未配置 `AI_API_URL` / `AI_API_KEY` / `AI_MODEL` | 0 元，使用本地 fallback |
-| AI 兜底成功率 | 商品讲解、主播话术、竞拍复盘、异常出价提示 4 个接口 | 4/4 成功，成功率 100% |
+| 模型调用成本 | 本地兜底 / 外部模型两种模式 | 未配置模型时 0 元；配置 USTC LLM 后按网关配额或计费策略执行，仓库不提交密钥 |
+| AI 兜底成功率 | 未配置模型时，商品讲解、主播话术、竞拍复盘、异常出价提示 4 个接口 | 4/4 成功，成功率 100% |
 | RAG 召回率 | 当前版本未接入 RAG / 向量库 | 不适用 |
 
 说明：以上结果为本机单进程 Node.js、本地 JSON 存储、临时测试数据文件下的演示级指标，不代表生产高并发能力。
@@ -449,6 +459,7 @@ flowchart TD
 
 | 场景 | 测试结果 |
 | --- | --- |
+| 中科大 LLM 网关已配置 | 商品讲解词接口返回 `source: "model"`、`fallback: false`、`message: "USTC LLM 生成成功"` |
 | 未配置模型 API | 4 个 AI 接口均返回 `source: "fallback"`、`fallback: true` |
 | 商品讲解词 | 返回 79 字中文讲解词，包含商品名、起拍价、最低加价、封顶价和竞拍时长 |
 | 主播实时话术 | 返回可直接口播的话术建议 |

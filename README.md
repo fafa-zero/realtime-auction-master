@@ -22,7 +22,7 @@ https://github.com/fafa-zero/realtime-auction-master.git
 - 权限控制：主播不能代替买家出价；Socket 连接使用 token 校验，服务端按登录态识别用户身份。
 - 弹幕治理：支持弹幕历史、飞屏展示、限频、敏感词过滤、撤回弹幕和屏蔽用户。
 - 审计日志：记录开拍、取消、商品管理、出价、支付、弹幕治理、演示重置和登录限流等关键动作。
-- AI 助手：支持商品讲解词、竞拍复盘、主播实时话术和异常出价提示；未配置模型时使用本地兜底内容。
+- AI 助手：支持商品讲解词、竞拍复盘、主播实时话术和异常出价提示；可接入中科大 LLM 网关，未配置或调用失败时使用本地兜底内容。
 - 持久化：默认使用本地 JSON；可切换到 MySQL，MySQL 不可用时仍能保留 JSON 演示兜底。
 
 ## 技术栈
@@ -31,7 +31,7 @@ https://github.com/fafa-zero/realtime-auction-master.git
 - Server：Node.js、Express、Socket.IO、ws、Zod、TypeScript
 - 小程序：微信小程序原生 WXML / WXSS / JS
 - 数据：本地 JSON 文件或 MySQL
-- AI：兼容 OpenAI Chat Completions 风格的模型接口，可本地兜底
+- AI：中科大 LLM 网关 / DeepSeek / 其他兼容 OpenAI Chat Completions 风格的模型接口，可本地兜底
 
 ## 项目结构
 
@@ -71,6 +71,8 @@ npm run demo
 ```
 
 该命令会依次完成 Web 构建、Server 构建、演示数据重置，并以 `4300` 端口启动后端。后端会同时托管 API、Socket.IO、静态图片和前端页面。
+
+如需启用真实 AI 生成，先在 `.env.local` 或启动命令中配置 `USTC_LLM_API_KEY`；未配置时演示仍会返回本地兜底文案。
 
 访问地址：
 
@@ -193,6 +195,9 @@ MAX_UPLOAD_BYTES=2097152
 AI_API_URL=
 AI_API_KEY=
 AI_MODEL=
+USTC_LLM_API_KEY=
+USTC_LLM_API_URL=https://api.llm.ustc.edu.cn/v1/chat/completions
+USTC_LLM_MODEL=deepseek-v4-flash-ascend
 DEEPSEEK_API_KEY=
 DEEPSEEK_API_URL=https://api.deepseek.com/chat/completions
 DEEPSEEK_MODEL=deepseek-v4-flash
@@ -210,21 +215,23 @@ WECHAT_MINIPROGRAM_SECRET=
 - `DATABASE_URL`：MySQL 连接字符串，优先级高于拆分的 `MYSQL_*` 配置。
 - `HOST_INVITE_CODE`：主播注册邀请码。未配置时不允许公开注册新主播，但内置演示主播可用。
 - `MAX_UPLOAD_BYTES`：商品导入文件大小上限，默认 2MB。
+- `USTC_LLM_API_KEY`：中科大 LLM 网关 API Key；配置后会默认调用 `https://api.llm.ustc.edu.cn/v1/chat/completions` 和 `deepseek-v4-flash-ascend`。
+- `USTC_LLM_API_URL` / `USTC_LLM_MODEL`：中科大 LLM 网关接口地址和模型。
 - `DEEPSEEK_API_KEY`：DeepSeek API Key；配置后商品讲解词、主播话术、竞拍复盘和异常出价提示会优先调用 DeepSeek。
 - `DEEPSEEK_API_URL` / `DEEPSEEK_MODEL`：DeepSeek 接口地址和模型，默认分别为 `https://api.deepseek.com/chat/completions` 和 `deepseek-v4-flash`。
-- `AI_API_URL` / `AI_API_KEY` / `AI_MODEL`：通用 OpenAI 兼容模型配置；优先级高于 DeepSeek 默认配置，未配置 key 时使用本地兜底。
+- `AI_API_URL` / `AI_API_KEY` / `AI_MODEL`：通用 OpenAI 兼容模型配置；优先级最高。模型配置优先级为 `AI_*` > `USTC_LLM_*` > `DEEPSEEK_*`，未配置 key 时使用本地兜底。
 - `WECHAT_MINIPROGRAM_APPID` / `WECHAT_MINIPROGRAM_SECRET`：预留给真实微信小程序登录。
 
-DeepSeek 启动示例：
+中科大 LLM 网关启动示例：
 
 ```bash
-DEEPSEEK_API_KEY=your_deepseek_key npm run demo
+USTC_LLM_API_KEY=your_ustc_llm_key npm run demo
 ```
 
 也可以在仓库根目录创建 `.env`，该文件已被 `.gitignore` 忽略，不会提交到远端：
 
 ```bash
-DEEPSEEK_API_KEY=your_deepseek_key
+USTC_LLM_API_KEY=your_ustc_llm_key
 ```
 
 然后直接运行：
@@ -233,7 +240,7 @@ DEEPSEEK_API_KEY=your_deepseek_key
 npm run demo
 ```
 
-主播端商品队列点击“重新生成讲解词”后，会自动调用 DeepSeek 生成商品讲解词；如果模型调用失败，系统会回退到本地兜底文案。
+主播端商品队列点击“重新生成讲解词”后，会自动调用中科大 LLM 网关生成商品讲解词；接口成功时返回 `source: "model"` 和 `message: "USTC LLM 生成成功"`，如果模型调用失败则回退到本地兜底文案。
 
 ## MySQL 持久化
 
