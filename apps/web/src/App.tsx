@@ -1710,6 +1710,55 @@ export function App() {
           ) : null}
         </section>
 
+        {viewMode === "host" ? (
+          <section className="panel-section">
+            <div className="section-title">
+              <RotateCcw size={18} />
+              <h2>主播操作</h2>
+            </div>
+            <div className="settings-grid">
+              <label className="field">
+                <span>竞拍时长（秒）</span>
+                <input
+                  type="number"
+                  min={15}
+                  max={600}
+                  value={durationSeconds}
+                  onChange={(event) => setDurationSeconds(event.target.value)}
+                />
+              </label>
+              <label className="field">
+                <span>最低加价</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={incrementStep}
+                  onChange={(event) => setIncrementStep(event.target.value)}
+                />
+              </label>
+              <label className="field">
+                <span>封顶价</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={ceilingPrice}
+                  onChange={(event) => setCeilingPrice(event.target.value)}
+                />
+              </label>
+            </div>
+            <div className="button-row">
+              <button onClick={startAuction}>开始/重开竞拍</button>
+              <button
+                className="danger"
+                disabled={snapshot.auction.status !== "ACTIVE"}
+                onClick={cancelAuction}
+              >
+                取消竞拍
+              </button>
+            </div>
+          </section>
+        ) : null}
+
         {viewMode === "buyer" ? (
           <section className="panel-section buyer-guide">
             <div className="section-title">
@@ -1839,7 +1888,7 @@ export function App() {
                 </button>
               </div>
               <p className="muted template-hint">
-                可上传 docs/product-import-template.csv；表头：商品名称、商品描述、起拍价、最低加价、封顶价、竞拍时长秒、库存、商品卖点、讲解关键词。
+                可上传 docs/product-import-demo-top10.csv；表头：商品名称、商品描述、商品图片、起拍价、最低加价、封顶价、竞拍时长秒、库存、商品卖点、讲解关键词。
               </p>
               {importResult ? (
                 <div className="import-result">
@@ -2023,53 +2072,6 @@ export function App() {
                   <p>可生成商品讲解词、竞拍复盘、主播话术或异常出价提示。</p>
                 </div>
               )}
-            </section>
-
-            <section className="panel-section">
-              <div className="section-title">
-                <RotateCcw size={18} />
-                <h2>主播操作</h2>
-              </div>
-              <div className="settings-grid">
-                <label className="field">
-                  <span>竞拍时长（秒）</span>
-                  <input
-                    type="number"
-                    min={15}
-                    max={600}
-                    value={durationSeconds}
-                    onChange={(event) => setDurationSeconds(event.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  <span>最低加价</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={incrementStep}
-                    onChange={(event) => setIncrementStep(event.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  <span>封顶价</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={ceilingPrice}
-                    onChange={(event) => setCeilingPrice(event.target.value)}
-                  />
-                </label>
-              </div>
-              <div className="button-row">
-                <button onClick={startAuction}>开始/重开竞拍</button>
-                <button
-                  className="danger"
-                  disabled={snapshot.auction.status !== "ACTIVE"}
-                  onClick={cancelAuction}
-                >
-                  取消竞拍
-                </button>
-              </div>
             </section>
 
             <section className="panel-section">

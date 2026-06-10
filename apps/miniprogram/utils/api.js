@@ -1,13 +1,12 @@
 const API_BASE_URL_CANDIDATES = [
   "http://localhost:4300",
-  "http://127.0.0.1:4300"
+  "http://127.0.0.1:4300",
+  "http://172.29.96.253:4300"
 ];
 const DEFAULT_API_BASE_URL = API_BASE_URL_CANDIDATES[0];
 const REQUEST_TIMEOUT_MS = 10000;
 const FALLBACK_STATUS_CODES = [502, 503, 504];
-const IGNORED_API_BASE_URLS = [
-  "http://172.29.96.253:4300"
-];
+const IGNORED_API_BASE_URLS = [];
 
 function getAppConfig() {
   const app = getApp();
@@ -193,6 +192,12 @@ function getLiveRoom(liveRoomId) {
   return request(`/api/live-rooms/${encodeURIComponent(liveRoomId)}`);
 }
 
+function recordLiveRoomView(liveRoomId) {
+  return request(`/api/live-rooms/${encodeURIComponent(liveRoomId)}/view`, {
+    method: "POST"
+  });
+}
+
 function getAuctionSnapshot(liveRoomId) {
   return request(`/api/live-rooms/${encodeURIComponent(liveRoomId)}/auction`);
 }
@@ -241,6 +246,7 @@ module.exports = {
   logoutBuyer,
   payOrder,
   placeBid,
+  recordLiveRoomView,
   registerBuyer,
   request,
   sendDanmaku,

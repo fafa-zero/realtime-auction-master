@@ -41,6 +41,7 @@ import {
   logoutSession,
   payOrder,
   placeBid,
+  recordLiveRoomView,
   recordAuditLog,
   registerMiniprogram,
   registerWebUser,
@@ -509,6 +510,18 @@ app.get("/api/live-rooms/:liveRoomId", (req, res) => {
     res.json({
       ok: true,
       room: getLiveRoom(req.params.liveRoomId)
+    });
+  } catch (error) {
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
+app.post("/api/live-rooms/:liveRoomId/view", (req, res) => {
+  try {
+    assertLiveRoom(req.params.liveRoomId);
+    res.json({
+      ok: true,
+      room: recordLiveRoomView(req.params.liveRoomId)
     });
   } catch (error) {
     res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });

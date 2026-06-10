@@ -236,6 +236,12 @@ export function getLiveRoom(liveRoomId = DEFAULT_LIVE_ROOM_ID) {
   return enrichLiveRoom(requireLiveRoom(liveRoomId));
 }
 
+export function recordLiveRoomView(liveRoomId = DEFAULT_LIVE_ROOM_ID) {
+  const liveRoom = requireLiveRoom(liveRoomId);
+  liveRoom.viewerCount += 1;
+  return enrichLiveRoom(liveRoom);
+}
+
 export function getLiveRoomsForHost(userId: string) {
   return getLiveRooms().filter((room) => room.ownerUserId === userId);
 }

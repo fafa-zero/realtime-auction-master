@@ -15,7 +15,7 @@
     </view>
 
     <view class="stage">
-      <image wx:if="{{snapshot.product.imageUrl}}" src="{{snapshot.product.imageUrl}}" mode="aspectFill" />
+      <image wx:if="{{safeProductImageUrl}}" src="{{safeProductImageUrl}}" mode="aspectFill" />
       <view wx:else class="stage-placeholder">模拟直播画面</view>
       <view class="danmaku-layer">
         <view wx:for="{{stageDanmakuMessages}}" wx:key="id" class="danmaku-float row-{{index}}">
@@ -56,7 +56,7 @@
           placeholder="说点什么"
           bindinput="onDanmakuInput"
         />
-        <button class="primary danmaku-button" disabled="{{sendingDanmaku || !danmakuText}}" bindtap="submitDanmaku">
+        <button class="primary danmaku-button" disabled="{{sendingDanmaku}}" bindtap="submitDanmaku">
           {{sendingDanmaku ? "发送中" : "发送"}}
         </button>
       </view>

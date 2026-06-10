@@ -8,12 +8,21 @@ const {
   getMyOrders,
   payOrder,
   placeBid,
+  recordLiveRoomView,
   sendDanmaku,
   setApiBaseUrl
 } = require("../../utils/api");
 const { money, remaining, time } = require("../../utils/format");
 
 const POLLING_INTERVAL_MS = 1500;
+const LOCAL_PRODUCT_IMAGES = {
+  "/static/jewelry.jpg": "/assets/jewelry.jpg",
+  "/static/products/shuilanlan.jpg": "/assets/products/shuilanlan.jpg",
+  "/static/products/liduxiuluo.jpg": "/assets/products/liduxiuluo.jpg",
+  "/static/products/chixin-yongshi.jpg": "/assets/products/chixin-yongshi.jpg",
+  "/static/products/luoyin.jpg": "/assets/products/luoyin.jpg",
+  "/static/products/jimie-gulong.jpg": "/assets/products/jimie-gulong.jpg"
+};
 
 const statusMap = {
   PENDING: "待开始",
@@ -81,6 +90,7 @@ Page({
     error: "",
     room: fallbackRoom,
     snapshot: fallbackSnapshot,
+    safeProductImageUrl: "",
     bidPrice: "",
     serverOffset: 0,
     remainingText: "00:00",
@@ -156,7 +166,7 @@ Page({
 
     try {
       const [roomData, snapshot] = await Promise.all([
-        getLiveRoom(this.data.liveRoomId),
+        this.recordViewOnce(),
         getAuctionSnapshot(this.data.liveRoomId)
       ]);
 
@@ -171,6 +181,15 @@ Page({
     } finally {
       this.setData({ loading: false });
     }
+  },
+
+  recordViewOnce() {
+    if (this.viewRecordedFor === this.data.liveRoomId) {
+      return getLiveRoom(this.data.liveRoomId);
+    }
+
+    this.viewRecordedFor = this.data.liveRoomId;
+    return recordLiveRoomView(this.data.liveRoomId).catch(() => getLiveRoom(this.data.liveRoomId));
   },
 
   async ensurePageLogin() {
@@ -502,9 +521,10 @@ Page({
 
   applySnapshot(snapshot) {
     const nextBid = snapshot.auction.currentPrice + snapshot.auction.incrementStep;
+    const safeProductImageUrl = this.resolveProductImageUrl(snapshot.product);
     const product = {
       ...snapshot.product,
-      imageUrl: this.resolveProductImageUrl(snapshot.product)
+      imageUrl: safeProductImageUrl
     };
     const bids = (snapshot.bids || []).map((bid) => ({
       ...bid,
@@ -523,6 +543,7 @@ Page({
 
     this.setData({
       snapshot: { ...snapshot, product, bids },
+      safeProductImageUrl,
       serverOffset: snapshot.serverTime - Date.now(),
       bidPrice: shouldUseNextBid ? String(nextBid) : this.data.bidPrice,
       currentPriceText: money(snapshot.auction.currentPrice),
@@ -572,12 +593,45 @@ Page({
       return "";
     }
 
+    const localImageUrl = this.resolveLocalProductImageUrl(product.imageUrl);
+
+    if (localImageUrl) {
+      return localImageUrl;
+    }
+
     return this.resolveAssetUrl(product.imageUrl);
   },
 
+  resolveLocalProductImageUrl(url) {
+    if (!url) {
+      return "";
+    }
+
+    if (LOCAL_PRODUCT_IMAGES[url]) {
+      return LOCAL_PRODUCT_IMAGES[url];
+    }
+
+    const localHttpPrefix = /^http:\/\/(?:localhost|127\.0\.0\.1|172\.29\.96\.253):4300(\/[^?#]*)/;
+    const localHttpMatch = String(url).match(localHttpPrefix);
+
+    if (localHttpMatch) {
+      return LOCAL_PRODUCT_IMAGES[localHttpMatch[1]] || "";
+    }
+
+    return "";
+  },
+
   resolveAssetUrl(url) {
-    if (!url || /^https?:\/\//.test(url)) {
+    if (!url) {
+      return "";
+    }
+
+    if (/^https:\/\//.test(url)) {
       return url;
+    }
+
+    if (/^http:\/\//.test(url)) {
+      return "";
     }
 
     return `${getApiBaseUrl()}${url.startsWith("/") ? url : `/${url}`}`;
@@ -660,8 +714,11 @@ Page({
         stageDanmakuMessages: messages.slice(0, 5),
         debugText: "弹幕发送成功"
       });
+      wx.showToast({ title: "弹幕已发送", icon: "success" });
     } catch (error) {
-      this.showHint(error.message || "弹幕发送失败");
+      const message = error.message || "弹幕发送失败";
+      this.showHint(message);
+      wx.showToast({ title: message.slice(0, 16), icon: "none" });
     } finally {
       this.setData({ sendingDanmaku: false });
     }
