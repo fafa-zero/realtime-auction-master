@@ -12,9 +12,20 @@ export interface AiResult {
   toolResults?: Record<string, unknown>;
 }
 
+export type AgentIntent =
+  | "product-script"
+  | "auction-summary"
+  | "host-cue"
+  | "bid-risk"
+  | "inventory-alert"
+  | "order-query"
+  | "after-sales"
+  | "live-review"
+  | "chat";
+
 export interface AgentChatResult extends AiResult {
   sessionId: string;
-  intent: "product-script" | "auction-summary" | "host-cue" | "bid-risk" | "chat";
+  intent: AgentIntent;
   citations: Array<{ id: string; title: string; content: string; score: number }>;
   historySize: number;
 }
@@ -25,7 +36,7 @@ const DEFAULT_USTC_LLM_API_URL = "https://api.llm.ustc.edu.cn/v1/chat/completion
 const DEFAULT_USTC_LLM_MODEL = "deepseek-v4-flash-ascend";
 
 export async function completeWithModel(input: {
-  task?: "product-script" | "auction-summary" | "host-cue" | "bid-risk" | "chat";
+  task?: AgentIntent;
   title: string;
   systemPrompt: string;
   userPrompt: string;
@@ -101,24 +112,9 @@ export async function completeWithAgentChat(input: {
   requestId?: string;
 }): Promise<AgentChatResult> {
   const baseUrl = process.env.AGENT_BASE_URL?.trim();
-  const fallbackContent = "已读取当前竞拍状态，请继续描述你想了解的内容。";
 
   if (!baseUrl) {
-    const result = await completeWithModel({
-      task: "chat",
-      title: "AI 竞拍助手",
-      systemPrompt: "你是直播电商竞拍助手，回答要客观、简洁、合规，不要替用户出价或修改订单。",
-      userPrompt: input.message,
-      fallbackContent,
-      context: input.context
-    });
-    return {
-      ...result,
-      sessionId: input.sessionId,
-      intent: "chat",
-      citations: [],
-      historySize: 0
-    };
+    return toChatFallback(input, "未配置 AGENT_BASE_URL，已使用 Node 只读运营兜底");
   }
 
   const controller = new AbortController();
@@ -174,7 +170,7 @@ export async function completeWithAgentChat(input: {
     const isFallback = data.fallback === true || data.source === "fallback";
     return {
       ok: true,
-      title: data.title?.trim() || "AI 竞拍助手",
+      title: data.title?.trim() || "Agent 运营工作台",
       content,
       generatedAt: typeof data.generatedAt === "number" ? data.generatedAt : Date.now(),
       source: isFallback ? "fallback" : "agent",
@@ -194,26 +190,158 @@ export async function completeWithAgentChat(input: {
   }
 }
 
-function toChatFallback(input: { sessionId: string }, message: string): AgentChatResult {
+function toChatFallback(
+  input: { sessionId: string; message: string; context: Record<string, unknown> },
+  message: string
+): AgentChatResult {
+  const intent = detectLocalAgentIntent(input.message);
   return {
     ok: true,
-    title: "AI 竞拍助手",
-    content: "已读取当前竞拍状态，请继续描述你想了解的内容。",
+    title: "Agent 运营工作台",
+    content: createLocalChatContent(intent, input.context),
     generatedAt: Date.now(),
     source: "fallback",
     fallback: true,
     message,
     sessionId: input.sessionId,
-    intent: "chat",
+    intent,
     citations: [],
     historySize: 0,
-    toolsUsed: [],
-    toolResults: {}
+    toolsUsed: getLocalToolPlan(intent),
+    toolResults: { localFallback: { intent, readOnly: true } }
   };
 }
 
+function detectLocalAgentIntent(message: string): AgentIntent {
+  const text = message.toLowerCase();
+
+  if (["售后", "退款", "退货", "换货", "物流", "投诉"].some((word) => text.includes(word))) {
+    return "after-sales";
+  }
+  if (["库存", "补货", "缺货", "低库存"].some((word) => text.includes(word))) {
+    return "inventory-alert";
+  }
+  if (["订单", "待支付", "已支付", "gmv", "成交额"].some((word) => text.includes(word))) {
+    return "order-query";
+  }
+  if (["直播复盘", "整场复盘", "全场复盘", "运营复盘", "直播表现"].some((word) => text.includes(word))) {
+    return "live-review";
+  }
+  if (["风险", "异常", "可疑", "风控"].some((word) => text.includes(word))) {
+    return "bid-risk";
+  }
+  if (["话术", "怎么说", "主播", "促成交"].some((word) => text.includes(word))) {
+    return "host-cue";
+  }
+  if (["复盘", "总结", "数据", "表现", "成交"].some((word) => text.includes(word))) {
+    return "auction-summary";
+  }
+  if (["商品", "卖点", "介绍", "讲解"].some((word) => text.includes(word))) {
+    return "product-script";
+  }
+  return "chat";
+}
+
+function createLocalChatContent(intent: AgentIntent, context: Record<string, unknown>) {
+  const product = asRecord(context.product);
+  const auction = asRecord(context.auction);
+  const inventory = asRecordList(context.inventory);
+  const orders = asRecordList(context.orders);
+  const history = asRecordList(context.history);
+  const bids = asRecordList(context.bids);
+  const paidOrders = orders.filter((item) => item.status === "PAID");
+  const pendingOrders = orders.filter((item) => item.status === "PENDING_PAYMENT");
+  const paidRevenue = paidOrders.reduce((sum, item) => sum + asNumber(item.finalPrice), 0);
+
+  if (intent === "inventory-alert") {
+    const attention = inventory
+      .filter((item) => asNumber(item.stock) <= 3)
+      .sort((left, right) => asNumber(left.stock) - asNumber(right.stock));
+    const outOfStock = attention.filter((item) => asNumber(item.stock) <= 0);
+    const names = attention.slice(0, 5).map((item) => String(item.name ?? "未命名商品")).join("、");
+    return `库存巡检：共 ${inventory.length} 件商品，缺货 ${outOfStock.length} 件，低库存 ${attention.length - outOfStock.length} 件。${names ? `建议优先核对：${names}。` : "当前无低库存商品。"}`;
+  }
+  if (intent === "order-query") {
+    return `订单概况：共 ${orders.length} 笔，已支付 ${paidOrders.length} 笔，待支付 ${pendingOrders.length} 笔，已支付成交额 ${paidRevenue} 元。`;
+  }
+  if (intent === "after-sales") {
+    return `当前未接入退款、退货或物流工单，Agent 只提供处理建议。可核对 ${paidOrders.length} 笔已支付订单和 ${pendingOrders.length} 笔待支付订单，再转人工处理。`;
+  }
+  if (intent === "live-review") {
+    const completed = history.filter((item) => ["SOLD", "UNSOLD", "CANCELLED"].includes(String(item.status)));
+    const sold = completed.filter((item) => item.status === "SOLD");
+    const bidCount = history.reduce((sum, item) => sum + asNumber(item.bidCount), 0);
+    const rate = completed.length ? Math.round((sold.length / completed.length) * 100) : 0;
+    return `直播复盘：已完成 ${completed.length} 轮，成交 ${sold.length} 轮，成交率 ${rate}%，累计出价 ${bidCount} 次，已支付成交额 ${paidRevenue} 元。`;
+  }
+  if (intent === "bid-risk") {
+    const bidRisk = asRecord(context.bidRisk);
+    if (!Object.keys(bidRisk).length) {
+      return "当前没有可供分析的最近出价，无法生成风险结论。";
+    }
+    const reasons = [
+      bidRisk.reachesCeiling ? "最近出价达到封顶价" : "",
+      asNumber(bidRisk.recentBidCount) >= 3 ? "30 秒内出价频率较高" : "",
+      asNumber(bidRisk.price) - asNumber(bidRisk.currentPrice) >= asNumber(bidRisk.incrementStep) * 5
+        ? "加价幅度明显高于最低加价"
+        : ""
+    ].filter(Boolean);
+    return reasons.length ? `风险等级：中。${reasons.join("；")}。建议人工复核。` : "风险等级：低。当前未发现明显异常。";
+  }
+  if (intent === "host-cue") {
+    const currentPrice = asNumber(auction.currentPrice);
+    const nextBid = currentPrice + asNumber(auction.incrementStep);
+    return `主播可以这样说：${String(product.name ?? "当前商品")}目前最高价 ${currentPrice} 元，下一口 ${nextBid} 元起，请结合商品详情理性参与。`;
+  }
+  if (intent === "auction-summary") {
+    return `当前竞拍状态为 ${String(auction.status ?? "PENDING")}，共 ${asNumber(context.participantCount)} 位参与者，累计 ${bids.length} 次出价，当前价 ${asNumber(auction.currentPrice)} 元。`;
+  }
+  if (intent === "product-script") {
+    return `${String(product.name ?? "当前商品")}：${String(product.description ?? "请先查看商品详情")}。当前库存 ${asNumber(product.stock)} 件，起拍价 ${asNumber(auction.startPrice)} 元，请理性参与竞拍。`;
+  }
+  return `已读取 ${String(product.name ?? "当前商品")} 的竞拍状态。你可以继续询问库存、订单、售后或直播复盘。`;
+}
+
+function getLocalToolPlan(intent: AgentIntent) {
+  const plans: Record<AgentIntent, string[]> = {
+    "product-script": ["get_product_info", "get_live_room_snapshot"],
+    "auction-summary": ["get_live_room_snapshot", "get_product_info", "get_auction_history"],
+    "host-cue": ["get_live_room_snapshot", "get_product_info", "generate_host_script"],
+    "bid-risk": ["get_live_room_snapshot", "analyze_bid_risk"],
+    "inventory-alert": ["get_live_room_snapshot", "get_inventory_status"],
+    "order-query": ["get_order_overview"],
+    "after-sales": ["get_order_overview", "get_after_sales_context"],
+    "live-review": ["get_live_room_snapshot", "get_auction_history", "get_order_overview", "analyze_live_performance"],
+    chat: ["get_live_room_snapshot", "get_product_info"]
+  };
+  return plans[intent];
+}
+
+function asRecordList(value: unknown) {
+  return Array.isArray(value) ? value.filter(isRecord) : [];
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {};
+}
+
+function asNumber(value: unknown) {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function isAgentIntent(value: unknown): value is AgentChatResult["intent"] {
-  return value === "product-script" || value === "auction-summary" || value === "host-cue" || value === "bid-risk" || value === "chat";
+  return (
+    value === "product-script" ||
+    value === "auction-summary" ||
+    value === "host-cue" ||
+    value === "bid-risk" ||
+    value === "inventory-alert" ||
+    value === "order-query" ||
+    value === "after-sales" ||
+    value === "live-review" ||
+    value === "chat"
+  );
 }
 
 function parseStringList(value: unknown) {
@@ -241,7 +369,7 @@ function parseCitations(value: unknown): AgentChatResult["citations"] {
 async function completeWithAgent(
   baseUrl: string,
   input: {
-    task?: "product-script" | "auction-summary" | "host-cue" | "bid-risk" | "chat";
+    task?: AgentIntent;
     title: string;
     systemPrompt: string;
     userPrompt: string;

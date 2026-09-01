@@ -85,6 +85,101 @@ def get_recent_danmaku(context: dict[str, Any]) -> dict[str, Any]:
     return {"messages": messages[:10], "count": len(messages)}
 
 
+def get_inventory_status(context: dict[str, Any]) -> dict[str, Any]:
+    """Summarize room inventory without mutating product stock."""
+    inventory = context.get("inventory")
+    items = inventory if isinstance(inventory, list) else []
+    normalized: list[dict[str, Any]] = []
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        stock = max(int(_number(item.get("stock"))), 0)
+        normalized.append(
+            {
+                "id": item.get("id"),
+                "name": item.get("name", "未命名商品"),
+                "stock": stock,
+                "queueStatus": item.get("queueStatus", "QUEUED"),
+            }
+        )
+
+    out_of_stock = [item for item in normalized if item["stock"] == 0]
+    low_stock = [item for item in normalized if 0 < item["stock"] <= 3]
+    attention_items = sorted(
+        [*out_of_stock, *low_stock], key=lambda item: (item["stock"], str(item["name"]))
+    )
+    return {
+        "totalProducts": len(normalized),
+        "totalStock": sum(item["stock"] for item in normalized),
+        "outOfStockCount": len(out_of_stock),
+        "lowStockCount": len(low_stock),
+        "lowStockThreshold": 3,
+        "attentionItems": attention_items[:10],
+    }
+
+
+def get_order_overview(context: dict[str, Any]) -> dict[str, Any]:
+    """Return an aggregate and a bounded recent-order list for the current user scope."""
+    orders = context.get("orders")
+    items = [item for item in orders if isinstance(item, dict)] if isinstance(orders, list) else []
+    paid = [item for item in items if item.get("status") == "PAID"]
+    pending = [item for item in items if item.get("status") == "PENDING_PAYMENT"]
+    return {
+        "totalOrders": len(items),
+        "paidCount": len(paid),
+        "pendingPaymentCount": len(pending),
+        "paidRevenue": sum(_number(item.get("finalPrice")) for item in paid),
+        "pendingAmount": sum(_number(item.get("finalPrice")) for item in pending),
+        "recentOrders": items[:10],
+    }
+
+
+def get_after_sales_context(context: dict[str, Any]) -> dict[str, Any]:
+    """Provide read-only service guidance from order state; no refund workflow is implied."""
+    overview = get_order_overview(context)
+    suggestions: list[str] = []
+    if overview["pendingPaymentCount"]:
+        suggestions.append("待支付订单先核对支付状态和超时规则，避免重复催付")
+    if overview["paidCount"]:
+        suggestions.append("已支付订单可先核对订单号、商品和成交金额，再进入人工售后流程")
+    if not suggestions:
+        suggestions.append("当前没有可供分析的订单，请先确认订单号和买家身份")
+    return {
+        "caseDataAvailable": False,
+        "pendingPaymentCount": overview["pendingPaymentCount"],
+        "paidCount": overview["paidCount"],
+        "suggestions": suggestions,
+        "boundary": "当前系统未接入退款、退货或物流工单，Agent 只提供处理建议",
+    }
+
+
+def analyze_live_performance(context: dict[str, Any]) -> dict[str, Any]:
+    """Aggregate auction history, orders and interaction signals for room review."""
+    history = context.get("history")
+    rounds = [item for item in history if isinstance(item, dict)] if isinstance(history, list) else []
+    completed = [
+        item for item in rounds if item.get("status") in {"SOLD", "UNSOLD", "CANCELLED"}
+    ]
+    sold = [item for item in completed if item.get("status") == "SOLD"]
+    order_overview = get_order_overview(context)
+    danmaku = context.get("recentDanmaku")
+    recent_danmaku = danmaku if isinstance(danmaku, list) else []
+    return {
+        "roundCount": len(rounds),
+        "completedRoundCount": len(completed),
+        "soldRoundCount": len(sold),
+        "sellThroughRate": round(len(sold) / len(completed), 4) if completed else 0,
+        "bidCount": sum(int(_number(item.get("bidCount"))) for item in rounds),
+        "maxParticipantCount": max(
+            (int(_number(item.get("participantCount"))) for item in rounds), default=0
+        ),
+        "paidRevenue": order_overview["paidRevenue"],
+        "pendingPaymentCount": order_overview["pendingPaymentCount"],
+        "recentDanmakuCount": len(recent_danmaku),
+    }
+
+
 def analyze_bid_risk(context: dict[str, Any]) -> dict[str, Any]:
     """Apply explainable risk rules before asking a model for wording."""
     auction = _auction(context)
@@ -152,6 +247,10 @@ TOOLS: dict[str, Tool] = {
     "get_recent_danmaku": Tool("get_recent_danmaku", "读取最近弹幕互动", get_recent_danmaku),
     "analyze_bid_risk": Tool("analyze_bid_risk", "使用可解释规则分析异常出价", analyze_bid_risk),
     "generate_host_script": Tool("generate_host_script", "整理主播话术所需的结构化简报", generate_host_script),
+    "get_inventory_status": Tool("get_inventory_status", "检查直播间库存与低库存商品", get_inventory_status),
+    "get_order_overview": Tool("get_order_overview", "汇总当前权限范围内的订单和支付状态", get_order_overview),
+    "get_after_sales_context": Tool("get_after_sales_context", "根据订单状态生成售后处理建议", get_after_sales_context),
+    "analyze_live_performance": Tool("analyze_live_performance", "汇总场次、成交、收入与互动指标", analyze_live_performance),
 }
 
 
@@ -160,6 +259,15 @@ TASK_PLANS: dict[str, list[str]] = {
     "auction-summary": ["get_live_room_snapshot", "get_product_info", "get_auction_history"],
     "host-cue": ["get_live_room_snapshot", "get_product_info", "get_recent_danmaku", "generate_host_script"],
     "bid-risk": ["get_live_room_snapshot", "analyze_bid_risk"],
+    "inventory-alert": ["get_live_room_snapshot", "get_inventory_status"],
+    "order-query": ["get_order_overview"],
+    "after-sales": ["get_order_overview", "get_after_sales_context"],
+    "live-review": [
+        "get_live_room_snapshot",
+        "get_auction_history",
+        "get_order_overview",
+        "analyze_live_performance",
+    ],
     "chat": ["get_live_room_snapshot", "get_product_info"],
 }
 

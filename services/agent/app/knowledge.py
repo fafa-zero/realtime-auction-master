@@ -46,6 +46,24 @@ KNOWLEDGE_BASE = (
         content="AI 话术应客观、简洁，不承诺保值或收益，不制造虚假紧迫感；风险提示只作为辅助判断。",
         keywords=("AI", "话术", "合规", "风险", "保值", "收益", "虚假"),
     ),
+    KnowledgeDocument(
+        id="inventory-operations",
+        title="库存运营",
+        content="库存预警用于识别缺货和低库存商品；补货和库存修改仍需运营人员确认。",
+        keywords=("库存", "补货", "缺货", "低库存", "商品"),
+    ),
+    KnowledgeDocument(
+        id="order-service-boundary",
+        title="订单与售后边界",
+        content="Agent 可以查询权限范围内的订单状态并给出售后建议，但不会自动支付、退款、退货或修改订单。",
+        keywords=("订单", "待支付", "已支付", "售后", "退款", "退货", "物流"),
+    ),
+    KnowledgeDocument(
+        id="live-review-metrics",
+        title="直播复盘指标",
+        content="直播复盘应结合成交率、出价次数、参与人数、已支付成交额、待支付订单和互动情况给出后续建议。",
+        keywords=("直播复盘", "整场复盘", "成交率", "成交额", "互动", "运营"),
+    ),
 )
 
 
@@ -64,4 +82,3 @@ def retrieve(query: str, top_k: int = 3) -> list[KnowledgeHit]:
         general = KNOWLEDGE_BASE[0]
         scored.append(KnowledgeHit(general.id, general.title, general.content, 0.1))
     return sorted(scored, key=lambda item: item.score, reverse=True)[:top_k]
-

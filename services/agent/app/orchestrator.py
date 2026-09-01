@@ -10,7 +10,15 @@ from .tools import run_tool_plan
 
 def detect_intent(message: str) -> str:
     text = message.lower()
-    if any(word in text for word in ("风险", "异常", "可疑", "出价", "封顶")):
+    if any(word in text for word in ("售后", "退款", "退货", "换货", "物流", "投诉")):
+        return "after-sales"
+    if any(word in text for word in ("库存", "补货", "缺货", "低库存")):
+        return "inventory-alert"
+    if any(word in text for word in ("订单", "待支付", "已支付", "gmv", "成交额")):
+        return "order-query"
+    if any(word in text for word in ("直播复盘", "整场复盘", "全场复盘", "运营复盘", "直播表现")):
+        return "live-review"
+    if any(word in text for word in ("风险", "异常", "可疑", "风控")):
         return "bid-risk"
     if any(word in text for word in ("话术", "怎么说", "主播", "促成交")):
         return "host-cue"
@@ -37,6 +45,37 @@ def _fallback_content(intent: str, context: dict[str, Any], hits: list[Knowledge
     if intent == "auction-summary":
         history = tool_results.get("get_auction_history", {})
         return f"当前竞拍共有 {history.get('participantCount', 0)} 位参与者，累计 {history.get('bidCount', 0)} 次出价。"
+    if intent == "inventory-alert":
+        inventory = tool_results.get("get_inventory_status", {})
+        attention = inventory.get("attentionItems") or []
+        names = "、".join(str(item.get("name", "未命名商品")) for item in attention[:5])
+        detail = f"需关注：{names}。" if names else "当前无低库存商品。"
+        return (
+            f"库存巡检：共 {inventory.get('totalProducts', 0)} 件商品，"
+            f"缺货 {inventory.get('outOfStockCount', 0)} 件，"
+            f"低库存 {inventory.get('lowStockCount', 0)} 件。{detail}"
+        )
+    if intent == "order-query":
+        orders = tool_results.get("get_order_overview", {})
+        return (
+            f"订单概况：共 {orders.get('totalOrders', 0)} 笔，"
+            f"已支付 {orders.get('paidCount', 0)} 笔，"
+            f"待支付 {orders.get('pendingPaymentCount', 0)} 笔，"
+            f"已支付成交额 {orders.get('paidRevenue', 0)} 元。"
+        )
+    if intent == "after-sales":
+        service = tool_results.get("get_after_sales_context", {})
+        suggestions = service.get("suggestions") or []
+        return f"{service.get('boundary', '当前只提供售后处理建议')}。{' 。'.join(str(item) for item in suggestions)}。"
+    if intent == "live-review":
+        performance = tool_results.get("analyze_live_performance", {})
+        rate = round(float(performance.get("sellThroughRate", 0)) * 100)
+        return (
+            f"直播复盘：已完成 {performance.get('completedRoundCount', 0)} 轮，"
+            f"成交 {performance.get('soldRoundCount', 0)} 轮，成交率 {rate}%，"
+            f"累计出价 {performance.get('bidCount', 0)} 次，"
+            f"已支付成交额 {performance.get('paidRevenue', 0)} 元。"
+        )
     return hits[0].content if hits else "已读取当前竞拍状态，请继续描述你想了解的内容。"
 
 
@@ -60,13 +99,14 @@ async def run_chat(request: ChatRequest) -> ChatResponse:
     result = await run_agent(
         AgentRunRequest(
             task=intent,
-            title="AI 竞拍助手",
+            title="Agent 运营工作台",
             system_prompt=(
-                "你是直播电商竞拍助手。先依据工具结果和业务知识回答，保持客观、简洁、合规；"
+                "你是直播电商运营 Agent。先依据工具结果和业务知识回答，保持客观、简洁、合规；"
                 "不要替用户出价、支付或修改订单，不确定时明确说明需要以系统状态为准。"
             ),
             user_prompt=user_prompt,
             fallback_content=fallback,
+            policy_text=request.message,
             context=request.context,
         )
     )

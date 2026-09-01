@@ -64,6 +64,46 @@ EVALUATION_CASES: tuple[dict[str, Any], ...] = (
             "bids": [{"price": 320}],
         },
     },
+    {
+        "id": "inventory-alert",
+        "message": "检查低库存商品并给出补货建议",
+        "expectedIntent": "inventory-alert",
+        "expectedTools": ["get_live_room_snapshot", "get_inventory_status"],
+        "expectedCitation": "inventory-operations",
+        "context": {"inventory": [{"name": "翡翠", "stock": 1}]},
+    },
+    {
+        "id": "order-query",
+        "message": "查询直播间订单和待支付情况",
+        "expectedIntent": "order-query",
+        "expectedTools": ["get_order_overview"],
+        "expectedCitation": "order-service-boundary",
+        "context": {"orders": [{"status": "PENDING_PAYMENT", "finalPrice": 200}]},
+    },
+    {
+        "id": "after-sales",
+        "message": "请给出退款售后处理建议",
+        "expectedIntent": "after-sales",
+        "expectedTools": ["get_order_overview", "get_after_sales_context"],
+        "expectedCitation": "order-service-boundary",
+        "context": {"orders": [{"status": "PAID", "finalPrice": 320}]},
+    },
+    {
+        "id": "live-review",
+        "message": "做一次整场直播复盘和运营分析",
+        "expectedIntent": "live-review",
+        "expectedTools": [
+            "get_live_room_snapshot",
+            "get_auction_history",
+            "get_order_overview",
+            "analyze_live_performance",
+        ],
+        "expectedCitation": "live-review-metrics",
+        "context": {
+            "history": [{"status": "SOLD", "bidCount": 5, "participantCount": 3}],
+            "orders": [{"status": "PAID", "finalPrice": 500}],
+        },
+    },
 )
 
 

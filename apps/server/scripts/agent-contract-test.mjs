@@ -62,6 +62,25 @@ try {
   assert.equal(result.sessionId, "contract-session");
   assert.equal(result.citations[0].id, "auction-rules");
   assert.deepEqual(result.toolsUsed, ["get_live_room_snapshot"]);
+
+  delete process.env.AGENT_BASE_URL;
+  const localFallback = await completeWithAgentChat({
+    message: "检查库存并给出补货建议",
+    sessionId: "local-fallback",
+    userId: "host-1",
+    userRole: "HOST",
+    liveRoomId: "live-1",
+    context: {
+      inventory: [
+        { id: "product-1", name: "翡翠吊坠", stock: 1, queueStatus: "QUEUED" },
+        { id: "product-2", name: "机械手表", stock: 8, queueStatus: "QUEUED" }
+      ]
+    }
+  });
+  assert.equal(localFallback.intent, "inventory-alert");
+  assert.equal(localFallback.source, "fallback");
+  assert.match(localFallback.content, /低库存 1 件/);
+  assert.deepEqual(localFallback.toolsUsed, ["get_live_room_snapshot", "get_inventory_status"]);
   console.log("agent contract ok");
 } finally {
   await new Promise((resolve, reject) => mockAgent.close((error) => (error ? reject(error) : resolve())));

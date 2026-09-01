@@ -8,6 +8,10 @@ AgentTask = Literal[
     "auction-summary",
     "host-cue",
     "bid-risk",
+    "inventory-alert",
+    "order-query",
+    "after-sales",
+    "live-review",
     "chat",
 ]
 
@@ -20,6 +24,7 @@ class AgentRunRequest(BaseModel):
     system_prompt: str = Field(min_length=1, max_length=8_000)
     user_prompt: str = Field(min_length=1, max_length=20_000)
     fallback_content: str = Field(min_length=1, max_length=20_000)
+    policy_text: str | None = Field(default=None, max_length=2_000)
     context: dict[str, Any] = Field(default_factory=dict)
 
 

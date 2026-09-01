@@ -59,6 +59,18 @@ def test_node_to_fastapi_chat_contract_with_full_context(monkeypatch):
                 "participantCount": 2,
                 "recentDanmaku": ["想看细节"],
                 "history": [],
+                "inventory": [
+                    {"id": "product-1", "name": "翡翠吊坠", "stock": 1, "queueStatus": "ACTIVE"}
+                ],
+                "orders": [
+                    {
+                        "id": "order-1",
+                        "productId": "product-1",
+                        "productName": "翡翠吊坠",
+                        "status": "PENDING_PAYMENT",
+                        "finalPrice": 320,
+                    }
+                ],
                 "serverTime": 1,
             },
         }

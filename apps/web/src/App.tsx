@@ -88,6 +88,8 @@ type AgentChatMessage = {
   createdAt: number;
   intent?: string;
   toolsUsed?: string[];
+  source?: AiResult["source"];
+  citationCount?: number;
 };
 
 type WebSession = {
@@ -141,7 +143,6 @@ type PayOrderResponse =
       snapshot: AuctionSnapshot | null;
     };
 
-type AiTask = "script" | "summary" | "cue" | "risk";
 type ViewMode = "host" | "buyer";
 type SyncSource = "socket" | "polling" | "rest" | "offline";
 type AppRoute = {
@@ -150,13 +151,6 @@ type AppRoute = {
   home?: boolean;
   setup?: boolean;
   notFound?: boolean;
-};
-
-const aiTaskText: Record<AiTask, string> = {
-  script: "讲解词",
-  summary: "竞拍复盘",
-  cue: "主播话术",
-  risk: "风险提示"
 };
 
 function resolveApiUrl(configuredApiUrl?: string) {
@@ -202,12 +196,11 @@ export function App() {
   const [now, setNow] = useState(Date.now());
   const [serverOffset, setServerOffset] = useState(0);
   const [submittingBid, setSubmittingBid] = useState(false);
-  const [aiResult, setAiResult] = useState<AiResult | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
-  const [aiTask, setAiTask] = useState<AiTask | null>(null);
   const [agentChatInput, setAgentChatInput] = useState("");
   const [agentChatMessages, setAgentChatMessages] = useState<AgentChatMessage[]>([]);
   const [agentChatLoading, setAgentChatLoading] = useState(false);
+  const [agentQuickTask, setAgentQuickTask] = useState<string | null>(null);
   const [historyItems, setHistoryItems] = useState<AuctionHistoryItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [productQueue, setProductQueue] = useState<ProductQueueItem[]>([]);
@@ -683,6 +676,9 @@ export function App() {
         orders
       })
     : null;
+  const lowStockCount = productQueue.filter((item) => (item.product.stock ?? 0) <= 3).length;
+  const pendingPaymentCount = orders.filter((order) => order.status === "PENDING_PAYMENT").length;
+  const paidOrderCount = orders.filter((order) => order.status === "PAID").length;
   const currentQueueItem = snapshot
     ? productQueue.find((item) => item.product.id === snapshot.product.id) ?? null
     : null;
@@ -1011,61 +1007,8 @@ export function App() {
     );
   }
 
-  async function runAiTask(type: AiTask) {
-    setAiLoading(true);
-    setAiTask(type);
-    setAiResult(null);
-
-    try {
-      const price = Number(bidPrice || nextBid);
-      const endpoint =
-        type === "script"
-          ? "/api/ai/product-script"
-          : type === "summary"
-            ? "/api/ai/auction-summary"
-            : type === "cue"
-              ? "/api/ai/host-cue"
-              : "/api/ai/bid-risk";
-      const init =
-        type === "risk"
-          ? {
-              method: "POST",
-              headers: { "Content-Type": "application/json", ...getAuthHeaders(session) },
-              body: JSON.stringify({ liveRoomId, userId, price })
-            }
-          : {
-              method: "POST",
-              headers: { "Content-Type": "application/json", ...getAuthHeaders(session) },
-              body: JSON.stringify({ liveRoomId, productId: snapshot?.product.id })
-            };
-      const res = await fetch(`${API_URL}${endpoint}`, init);
-      const data = await readJson<AiResult>(res);
-
-      if (!res.ok) {
-        setMessage(data.message ?? "AI 助手生成失败");
-        return;
-      }
-
-      setAiResult(data);
-      if (data.product) {
-        const product = data.product;
-        setSnapshot((current) => (current ? { ...current, product } : current));
-      }
-      void refreshProductQueue();
-      setMessage(
-        data.message ??
-          (data.source === "fallback" ? "已使用本地 AI 兜底策略生成结果" : "AI 助手已生成结果")
-      );
-    } catch {
-      setMessage("AI 助手暂时不可用，请稍后重试");
-    } finally {
-      setAiLoading(false);
-      setAiTask(null);
-    }
-  }
-
-  async function sendAgentChat() {
-    const content = agentChatInput.trim();
+  async function sendAgentChat(messageOverride?: string, quickTask?: string) {
+    const content = (messageOverride ?? agentChatInput).trim();
 
     if (!content) {
       setMessage("请输入 Agent 消息");
@@ -1077,8 +1020,11 @@ export function App() {
       return;
     }
 
-    setAgentChatInput("");
+    if (!messageOverride) {
+      setAgentChatInput("");
+    }
     setAgentChatLoading(true);
+    setAgentQuickTask(quickTask ?? null);
     setAgentChatMessages((current) => [
       ...current,
       { role: "user", content, createdAt: Date.now() }
@@ -1108,7 +1054,9 @@ export function App() {
           content: data.content,
           createdAt: data.generatedAt,
           intent: data.intent,
-          toolsUsed: data.toolsUsed
+          toolsUsed: data.toolsUsed,
+          source: data.source,
+          citationCount: data.citations?.length ?? 0
         }
       ]);
       setMessage(data.message ?? "Agent 已完成回答");
@@ -1116,6 +1064,7 @@ export function App() {
       setMessage("Agent 服务暂时不可用，请稍后重试");
     } finally {
       setAgentChatLoading(false);
+      setAgentQuickTask(null);
     }
   }
 
@@ -1550,7 +1499,6 @@ export function App() {
 
   async function regenerateProductScript(productId: string) {
     setAiLoading(true);
-    setAiTask("script");
 
     try {
       const res = await fetch(
@@ -1564,7 +1512,6 @@ export function App() {
         return;
       }
 
-      setAiResult(data);
       if (data.product && snapshot?.product.id === data.product.id) {
         setSnapshot({ ...snapshot, product: data.product });
       }
@@ -1574,7 +1521,6 @@ export function App() {
       setMessage("讲解词生成失败");
     } finally {
       setAiLoading(false);
-      setAiTask(null);
     }
   }
 
@@ -2239,70 +2185,82 @@ export function App() {
               )}
             </section>
 
-            <section className="panel-section">
+            <section className="panel-section agent-workbench">
               <div className="section-title section-title-copy">
                 <Bot size={18} />
                 <div>
-                  <h2>AI 快捷生成</h2>
-                  <p>一键生成讲解词、主播话术和竞拍分析</p>
+                  <h2>Agent 运营工作台</h2>
+                  <p>商品、库存、订单与直播数据副驾</p>
                 </div>
               </div>
-              <div className="button-row ai-actions">
-                <button disabled={aiLoading} onClick={() => runAiTask("script")}>
-                  <FileText size={16} />
-                  <span>{aiTask === "script" ? "生成中" : "讲解词"}</span>
-                </button>
-                <button disabled={aiLoading} onClick={() => runAiTask("summary")}>
+
+              <div className="workbench-overview" aria-label="Agent 可用数据">
+                <div className="workbench-stat">
+                  <Package size={16} />
+                  <span>低库存</span>
+                  <strong>{lowStockCount} 件</strong>
+                </div>
+                <div className="workbench-stat">
+                  <CreditCard size={16} />
+                  <span>待支付</span>
+                  <strong>{pendingPaymentCount} 笔</strong>
+                </div>
+                <div className="workbench-stat">
+                  <BadgeCheck size={16} />
+                  <span>已支付</span>
+                  <strong>{paidOrderCount} 笔</strong>
+                </div>
+                <div className="workbench-stat">
                   <BarChart3 size={16} />
-                  <span>{aiTask === "summary" ? "生成中" : "竞拍复盘"}</span>
+                  <span>可复盘</span>
+                  <strong>{historyItems.length} 轮</strong>
+                </div>
+              </div>
+
+              <div className="workbench-task-heading">
+                <strong>常用任务</strong>
+                <span>只读分析</span>
+              </div>
+              <div className="agent-actions">
+                <button disabled={agentChatLoading} onClick={() => void sendAgentChat("为当前商品生成一段合规讲解词", "product-script")}>
+                  <FileText size={16} />
+                  <span>{agentQuickTask === "product-script" ? "生成中" : "商品讲解"}</span>
                 </button>
-                <button disabled={aiLoading} onClick={() => runAiTask("cue")}>
+                <button disabled={agentChatLoading} onClick={() => void sendAgentChat("结合当前竞拍和弹幕给我一句主播话术", "host-cue")}>
                   <Radio size={16} />
-                  <span>{aiTask === "cue" ? "生成中" : "主播话术"}</span>
+                  <span>{agentQuickTask === "host-cue" ? "生成中" : "主播话术"}</span>
                 </button>
-                <button disabled={aiLoading} onClick={() => runAiTask("risk")}>
+                <button disabled={agentChatLoading} onClick={() => void sendAgentChat("分析最近一次出价的异常风险", "bid-risk")}>
                   <ShieldAlert size={16} />
-                  <span>{aiTask === "risk" ? "生成中" : "风险提示"}</span>
+                  <span>{agentQuickTask === "bid-risk" ? "分析中" : "出价风险"}</span>
+                </button>
+                <button disabled={agentChatLoading} onClick={() => void sendAgentChat("复盘当前这轮竞拍的数据和成交表现", "auction-summary")}>
+                  <TrendingUp size={16} />
+                  <span>{agentQuickTask === "auction-summary" ? "分析中" : "竞拍复盘"}</span>
+                </button>
+                <button disabled={agentChatLoading} onClick={() => void sendAgentChat("检查当前直播间库存并给出补货优先级", "inventory-alert")}>
+                  <Package size={16} />
+                  <span>{agentQuickTask === "inventory-alert" ? "检查中" : "库存预警"}</span>
+                </button>
+                <button disabled={agentChatLoading} onClick={() => void sendAgentChat("查询当前直播间订单概况和待支付订单", "order-query")}>
+                  <CreditCard size={16} />
+                  <span>{agentQuickTask === "order-query" ? "查询中" : "订单查询"}</span>
+                </button>
+                <button disabled={agentChatLoading} onClick={() => void sendAgentChat("根据当前订单状态给出售后处理建议", "after-sales")}>
+                  <UserCheck size={16} />
+                  <span>{agentQuickTask === "after-sales" ? "分析中" : "售后建议"}</span>
+                </button>
+                <button disabled={agentChatLoading} onClick={() => void sendAgentChat("进行整场直播复盘，汇总成交、出价、订单和互动表现", "live-review")}>
+                  <BarChart3 size={16} />
+                  <span>{agentQuickTask === "live-review" ? "分析中" : "直播复盘"}</span>
                 </button>
               </div>
-              {aiLoading ? (
-                <div className="ai-box ai-loading">
-                  <div className="ai-title">
-                    <Sparkles className="spin" size={16} />
-                    <strong>{aiTask ? `${aiTaskText[aiTask]}生成中` : "AI 助手生成中"}</strong>
-                  </div>
-                  <p>正在结合当前竞拍状态生成可演示结果。</p>
-                </div>
-              ) : aiResult ? (
-                <div className="ai-box">
-                  <div className="ai-title">
-                    {aiResult.level ? <ShieldAlert size={16} /> : <Bot size={16} />}
-                    <strong>{aiResult.title}</strong>
-                  </div>
-                  <div className="ai-meta">
-                    <span className={`source-badge source-${aiResult.source}`}>
-                      {aiResult.source === "fallback" ? "本地兜底" : aiResult.source === "agent" ? "Agent 生成" : "模型生成"}
-                    </span>
-                    {aiResult.level ? (
-                      <span className={`risk-badge risk-${getRiskClass(aiResult.level)}`}>
-                        风险{aiResult.level}
-                      </span>
-                    ) : null}
-                    <span>{formatTime(aiResult.generatedAt)}</span>
-                  </div>
-                  <p className="ai-content">{aiResult.content}</p>
-                </div>
-              ) : (
-                <div className="ai-empty">
-                  <Sparkles size={18} />
-                  <p>可生成商品讲解词、竞拍复盘、主播话术或异常出价提示。</p>
-                </div>
-              )}
+
               <div className="agent-chat">
                 <div className="agent-chat-heading">
                   <div>
-                    <strong>Agent 智能工作台</strong>
-                    <small>结合当前直播间连续追问</small>
+                    <strong>工作台对话</strong>
+                    <small>当前直播间 / Redis 多轮记忆</small>
                   </div>
                   {agentChatMessages.length > 0 ? <span>{agentChatMessages.length} 条</span> : null}
                 </div>
@@ -2314,8 +2272,10 @@ export function App() {
                         <p>{item.content}</p>
                         {item.role === "assistant" && item.intent ? (
                           <small>
-                            {item.intent}
+                            {getAgentIntentText(item.intent)}
+                            {item.source ? ` / ${item.source === "fallback" ? "本地兜底" : "Agent 生成"}` : ""}
                             {item.toolsUsed?.length ? ` / ${item.toolsUsed.join(" / ")}` : ""}
+                            {item.citationCount ? ` / ${item.citationCount} 条知识引用` : ""}
                           </small>
                         ) : null}
                       </div>
@@ -2332,7 +2292,7 @@ export function App() {
                   <input
                     value={agentChatInput}
                     maxLength={1_000}
-                    placeholder="例如：分析当前竞拍并给我一句话术"
+                    placeholder="询问库存、订单、售后或直播数据"
                     aria-label="Agent 消息"
                     disabled={agentChatLoading}
                     onChange={(event) => setAgentChatInput(event.target.value)}
@@ -3178,16 +3138,20 @@ function getBidFeedback(input: {
   return "本次出价满足规则，提交后会实时广播";
 }
 
-function getRiskClass(level: string) {
-  if (level === "高") {
-    return "high";
-  }
+function getAgentIntentText(intent: string) {
+  const labels: Record<string, string> = {
+    "product-script": "商品讲解",
+    "auction-summary": "竞拍复盘",
+    "host-cue": "主播话术",
+    "bid-risk": "出价风险",
+    "inventory-alert": "库存预警",
+    "order-query": "订单查询",
+    "after-sales": "售后建议",
+    "live-review": "直播复盘",
+    chat: "业务问答"
+  };
 
-  if (level === "中") {
-    return "medium";
-  }
-
-  return "low";
+  return labels[intent] ?? intent;
 }
 
 function getBidRiskClass(risk: BidRisk) {

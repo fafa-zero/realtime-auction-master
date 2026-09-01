@@ -145,6 +145,43 @@ def test_chat_routes_intent_retrieval_and_memory(monkeypatch):
     assert second.json()["historySize"] == 4
 
 
+@pytest.mark.parametrize(
+    ("message", "intent", "tool", "content_fragment"),
+    [
+        ("检查库存并给出补货建议", "inventory-alert", "get_inventory_status", "库存巡检"),
+        ("查询订单和待支付情况", "order-query", "get_order_overview", "订单概况"),
+        ("给出退款售后处理建议", "after-sales", "get_after_sales_context", "未接入退款"),
+        ("帮我做整场直播复盘", "live-review", "analyze_live_performance", "直播复盘"),
+    ],
+)
+def test_chat_routes_ecommerce_operations(message, intent, tool, content_fragment, monkeypatch):
+    monkeypatch.delenv("AI_API_KEY", raising=False)
+    monkeypatch.delenv("USTC_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    response = request(
+        "POST",
+        "/v1/agent/chat",
+        json={
+            "message": message,
+            "session_id": f"operations-{intent}",
+            "user_id": "host-operations",
+            "user_role": "HOST",
+            "live_room_id": "live-1",
+            "context": {
+                "inventory": [{"name": "翡翠", "stock": 1}],
+                "orders": [{"status": "PENDING_PAYMENT", "finalPrice": 200}],
+                "history": [{"status": "SOLD", "bidCount": 3, "participantCount": 2}],
+            },
+        },
+    )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["intent"] == intent
+    assert tool in payload["toolsUsed"]
+    assert content_fragment in payload["content"]
+
+
 def test_metrics_and_offline_evaluation_endpoints(monkeypatch):
     monkeypatch.delenv("AI_API_KEY", raising=False)
     monkeypatch.delenv("USTC_LLM_API_KEY", raising=False)

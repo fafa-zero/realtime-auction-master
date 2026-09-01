@@ -1081,14 +1081,38 @@ app.post("/api/agent/chat", async (req, res) => {
     const liveRoom = getLiveRoom(liveRoomId);
     const snapshot = getSnapshot(liveRoomId);
     const sessionId = input.sessionId ?? "default";
-    const history = getAuctionHistory(liveRoomId).slice(0, 10).map((item) => ({
+    const canAccessRoomOperations = user.role !== "BUYER";
+
+    if (canAccessRoomOperations) {
+      requireRoomHostUser(req, liveRoomId);
+    }
+
+    const inventory = canAccessRoomOperations ? getProductQueue(liveRoomId) : [];
+    const roomOrders = canAccessRoomOperations
+      ? getOrders(liveRoomId)
+      : getOrdersForUser(user.id, liveRoomId);
+    const historyItems = getAuctionHistory(liveRoomId).slice(0, 10);
+    const productNames = new Map([
+      ...inventory.map((item) => [item.product.id, item.product.name] as const),
+      ...historyItems.map((item) => [item.product.id, item.product.name] as const),
+      [snapshot.product.id, snapshot.product.name] as const
+    ]);
+    const history = historyItems.map((item) => ({
       status: item.auction.status,
       currentPrice: item.auction.currentPrice,
       participantCount: item.participantCount,
       bidCount: item.bids.length,
       productName: item.product.name,
+      finalPrice: item.order?.finalPrice,
+      orderStatus: item.order?.status,
       archivedAt: item.archivedAt
     }));
+    const latestBid = snapshot.bids[0];
+    const latestBidRecentCount = latestBid
+      ? snapshot.bids.filter(
+          (bid) => bid.userId === latestBid.userId && snapshot.serverTime - bid.createdAt <= 30_000
+        ).length
+      : 0;
     const context = {
       liveRoom: {
         id: liveRoom.id,
@@ -1130,6 +1154,36 @@ app.post("/api/agent/chat", async (req, res) => {
       participantCount: snapshot.participantCount,
       recentDanmaku: getDanmakuMessages(liveRoomId).slice(0, 10).map((item) => `${item.nickname}：${item.content}`),
       history,
+      inventory: inventory.map((item) => ({
+        id: item.product.id,
+        name: item.product.name,
+        stock: item.product.stock ?? 0,
+        queueStatus: item.product.queueStatus ?? "QUEUED",
+        auctionStatus: item.auction.status
+      })),
+      orders: roomOrders
+        .slice()
+        .sort((left, right) => right.createdAt - left.createdAt)
+        .slice(0, 30)
+        .map((order) => ({
+          id: order.id,
+          productId: order.productId,
+          productName: productNames.get(order.productId) ?? "竞拍商品",
+          buyerNickname: order.buyerNickname,
+          finalPrice: order.finalPrice,
+          status: order.status,
+          createdAt: order.createdAt
+        })),
+      bidRisk: latestBid
+        ? {
+            userId: latestBid.userId,
+            price: latestBid.price,
+            currentPrice: snapshot.bids[1]?.price ?? snapshot.auction.startPrice,
+            incrementStep: snapshot.auction.incrementStep,
+            recentBidCount: latestBidRecentCount,
+            reachesCeiling: latestBid.price >= snapshot.auction.ceilingPrice
+          }
+        : undefined,
       serverTime: snapshot.serverTime
     };
     const result = await completeWithAgentChat({

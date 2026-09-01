@@ -91,7 +91,7 @@ def _extract_content(data: dict[str, Any]) -> str:
 async def _run_agent(request: AgentRunRequest) -> AiResult:
     """Run one bounded agent task with a deterministic local fallback."""
     tool_results, tools_used = run_tool_plan(request.task, request.context)
-    violation = detect_policy_violation(f"{request.system_prompt}\n{request.user_prompt}")
+    violation = detect_policy_violation(request.policy_text or request.user_prompt)
     if violation:
         blocked = _fallback(request, f"检测到受限请求（{violation}），{SAFE_BLOCK_MESSAGE}", tools_used, tool_results)
         if hasattr(blocked, "model_copy"):
