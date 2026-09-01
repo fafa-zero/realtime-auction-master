@@ -29,9 +29,10 @@ uvicorn app.main:app --host 0.0.0.0 --port 8100 --reload
 
 ```bash
 npm run test:agent
+npm run test:agent-contract
 ```
 
-不配置模型 Key 也可以启动，接口会返回确定性的本地兜底内容。
+不配置模型 Key 也可以启动，接口会返回确定性的本地兜底内容。Agent 依赖 Redis 时使用 `REDIS_URL`；Redis 暂时不可用会自动回退到进程内存。
 
 ## 接口
 

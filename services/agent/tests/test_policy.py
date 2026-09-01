@@ -18,4 +18,5 @@ def test_policy_detects_injection_and_write_requests(message, code):
 
 def test_policy_allows_read_only_auction_question():
     assert detect_policy_violation("当前最高价和最低加价是多少？") is None
+    assert detect_policy_violation("帮我分析这次出价风险") is None
     assert "不能替你出价" in SAFE_BLOCK_MESSAGE

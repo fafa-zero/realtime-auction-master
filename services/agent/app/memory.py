@@ -79,6 +79,8 @@ class ConversationMemory:
         return self.get(key)
 
     async def aappend(self, key: str, role: str, content: str) -> None:
+        self._purge_expired()
+        self._purge(key)
         turn = MemoryTurn(role=role, content=content, created_at=time.time())
         turns = self._items.setdefault(key, deque(maxlen=self.max_turns))
         turns.append(turn)

@@ -11,7 +11,7 @@ npm install -D @playwright/test
 启动 `npm run demo` 后，可以分别运行：
 
 ```bash
-# FastAPI Agent 和业务编排（含覆盖率门禁）
+# FastAPI Agent 和业务编排
 npm run test:agent
 
 # Agent 离线回归评测（无需模型 API Key）
@@ -32,5 +32,7 @@ locust -f tests/load/locustfile.py --headless -u 20 -r 5 -t 30s
 ```
 
 默认压测只读取公开接口，不会修改竞拍价格或订单。
+
+GitHub Actions 的 Python Job 会额外执行 `pytest-cov`，并以 70% 覆盖率作为门禁。
 
 CI 工作流位于 `.github/workflows/ci.yml`，分开执行 Node、Python Agent、WebSocket、Playwright 和 Compose 配置校验。Playwright 失败时会保留 trace 和截图供定位。

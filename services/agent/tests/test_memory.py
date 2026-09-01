@@ -20,6 +20,18 @@ def test_memory_uses_bounded_local_fallback_without_redis():
     assert run(memory.asize("user:room:session")) == 2
 
 
+def test_async_append_preserves_local_ttl_semantics(monkeypatch):
+    now = [100.0]
+    monkeypatch.setattr("services.agent.app.memory.time.time", lambda: now[0])
+    memory = ConversationMemory(max_turns=4, ttl_seconds=10, redis_url="")
+
+    run(memory.aappend("ttl-key", "user", "old"))
+    now[0] = 111.0
+    run(memory.aappend("ttl-key", "user", "new"))
+
+    assert [turn.content for turn in run(memory.aget("ttl-key"))] == ["new"]
+
+
 class FakeRedis:
     def __init__(self):
         self.items: dict[str, list[str]] = {}

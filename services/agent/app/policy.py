@@ -14,7 +14,7 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
     (
         "write_action",
-        re.compile(r"(?:替我|帮我|直接|自动).{0,10}(?:出价|竞价|支付|付款|修改订单|改价)|(?:place[_ -]?bid|pay[_ -]?order|update[_ -]?order)", re.I),
+        re.compile(r"(?:替我|帮我|直接|自动)\s*(?:提交|进行|完成|执行)?\s*(?:出价|竞价|支付|付款|修改订单|改价)|(?:place[_ -]?bid|pay[_ -]?order|update[_ -]?order)", re.I),
     ),
 )
 
