@@ -16,6 +16,8 @@ services:
       MYSQL_DATABASE: realtime_auction
       MYSQL_CONNECTION_LIMIT: "10"
       REDIS_URL: redis://redis:6379/0
+      REDIS_SNAPSHOT_TTL_SECONDS: "15"
+      REDIS_SNAPSHOT_CACHE_READS: "false"
       AGENT_BASE_URL: http://agent:8100
       AGENT_SERVICE_TOKEN: ${AGENT_SERVICE_TOKEN:-local-agent-token}
       HOST_INVITE_CODE: ${HOST_INVITE_CODE:-compose-host}

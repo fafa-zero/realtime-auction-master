@@ -59,6 +59,12 @@ import type { ProductImportRow } from "./store.js";
 import { parseSpreadsheet, type SpreadsheetRecord } from "./spreadsheet.js";
 import { resolveMiniprogramLogin } from "./wechat.js";
 import { completeWithAgentChat } from "./ai.js";
+import {
+  closeRedisInfrastructure,
+  getAuctionSnapshotForRead,
+  initializeRedisInfrastructure,
+  publishRealtimeEvent
+} from "./redis-infrastructure.js";
 
 const PORT = Number(process.env.PORT ?? 4200);
 const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5174";
@@ -445,8 +451,8 @@ app.get("/api/me/orders", (req, res) => {
   }
 });
 
-app.get("/api/auction", (_req, res) => {
-  res.json(getSnapshot());
+app.get("/api/auction", async (_req, res) => {
+  res.json(await getAuctionSnapshotForRead(DEFAULT_LIVE_ROOM_ID, () => getSnapshot()));
 });
 
 app.get("/api/live-rooms", (_req, res) => {
@@ -529,10 +535,12 @@ app.post("/api/live-rooms/:liveRoomId/view", (req, res) => {
   }
 });
 
-app.get("/api/live-rooms/:liveRoomId/auction", (req, res) => {
+app.get("/api/live-rooms/:liveRoomId/auction", async (req, res) => {
   try {
     assertLiveRoom(req.params.liveRoomId);
-    res.json(getSnapshot(req.params.liveRoomId));
+    res.json(
+      await getAuctionSnapshotForRead(req.params.liveRoomId, () => getSnapshot(req.params.liveRoomId))
+    );
   } catch (error) {
     res.status(404).json({ ok: false, message: getErrorMessage(error) });
   }
@@ -1387,10 +1395,21 @@ miniprogramWss.on("connection", (ws) => {
 });
 
 await initializePersistence();
+await initializeRedisInfrastructure((event) => {
+  emitLocalRealtimeEvent(event.liveRoomId, event.type, event.payload);
+});
 
 server.listen(PORT, () => {
   console.log(`Auction server is running on http://localhost:${PORT}`);
 });
+
+for (const signal of ["SIGTERM", "SIGINT"] as const) {
+  process.once(signal, () => {
+    void closeRedisInfrastructure().finally(() => {
+      server.close();
+    });
+  });
+}
 
 function getErrorMessage(error: unknown) {
   if (error instanceof z.ZodError) {
@@ -1444,6 +1463,11 @@ function getLiveRoomSocketRoom(liveRoomId: string) {
 }
 
 function broadcastAuctionEvent(liveRoomId: string, type: string, payload: unknown) {
+  emitLocalRealtimeEvent(liveRoomId, type, payload);
+  void publishRealtimeEvent(liveRoomId, type, payload);
+}
+
+function emitLocalRealtimeEvent(liveRoomId: string, type: string, payload: unknown) {
   io.to(getLiveRoomSocketRoom(liveRoomId)).emit(type, payload);
 
   for (const [ws, client] of miniprogramClients.entries()) {

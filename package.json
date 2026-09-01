@@ -10,6 +10,7 @@
     "dev:agent": "python3 -m uvicorn services.agent.app.main:app --host 0.0.0.0 --port 8100 --reload",
     "test:agent": "python3 -m pytest -q services/agent/tests",
     "test:agent-contract": "npm --workspace apps/server run test:agent-contract",
+    "test:redis-infrastructure": "npm --workspace apps/server run test:redis-infrastructure",
     "eval:agent": "python3 -m services.agent.evaluate",
     "test:websocket": "python3 -m pytest -q tests/websocket",
     "test:e2e": "playwright test -c tests/e2e/playwright.config.ts",

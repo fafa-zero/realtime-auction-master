@@ -260,6 +260,9 @@ MYSQL_PASSWORD=
 MYSQL_DATABASE=realtime_auction
 MYSQL_CONNECTION_LIMIT=10
 REDIS_URL=redis://127.0.0.1:6379/0
+REDIS_SNAPSHOT_TTL_SECONDS=15
+REDIS_SNAPSHOT_CACHE_READS=false
+AUCTION_INSTANCE_ID=
 
 HOST_INVITE_CODE=
 MAX_UPLOAD_BYTES=2097152
@@ -289,7 +292,10 @@ WECHAT_MINIPROGRAM_SECRET=
 - `AUCTION_DATA_FILE`：本地 JSON 状态文件路径。
 - `AUCTION_STORAGE`：设为 `mysql` 时启用 MySQL 持久化；默认使用 JSON。
 - `DATABASE_URL`：MySQL 连接字符串，优先级高于拆分的 `MYSQL_*` 配置。
-- `REDIS_URL`：Redis 地址，Compose 中已预留给后续实时事件和缓存能力。
+- `REDIS_URL`：Redis 地址；配置后启用跨 Node 实例的实时事件桥和竞拍快照写入。
+- `REDIS_SNAPSHOT_TTL_SECONDS`：Redis 竞拍快照缓存 TTL；缓存仅用于读优化，默认 15 秒。
+- `REDIS_SNAPSHOT_CACHE_READS`：设为 `true` 后，竞拍快照 REST 接口优先读取 Redis；默认关闭并回退进程内状态。
+- `AUCTION_INSTANCE_ID`：可选实例标识，用于 Redis 事件桥避免重复回环；未配置时自动生成。
 - `HOST_INVITE_CODE`：主播注册邀请码。未配置时不允许公开注册新主播，但内置演示主播可用。
 - `MAX_UPLOAD_BYTES`：商品导入文件大小上限，默认 2MB。
 - `USTC_LLM_API_KEY`：中科大 LLM 网关 API Key；配置后会默认调用 `https://api.llm.ustc.edu.cn/v1/chat/completions` 和 `deepseek-v4-flash-ascend`。
