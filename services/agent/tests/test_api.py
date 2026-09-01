@@ -178,6 +178,43 @@ def test_metrics_and_offline_evaluation_endpoints(monkeypatch):
     assert evaluation["passed"] == evaluation["total"]
 
 
+def test_prometheus_metrics_endpoint(monkeypatch):
+    monkeypatch.delenv("AI_API_KEY", raising=False)
+    monkeypatch.delenv("USTC_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+
+    response = request(
+        "POST",
+        "/v1/agent/run",
+        json={
+            "task": "host-cue",
+            "title": "Prometheus 指标",
+            "system_prompt": "简短输出",
+            "user_prompt": "介绍商品",
+            "fallback_content": "欢迎参与竞拍",
+        },
+    )
+    assert response.status_code == 200
+
+    metrics_response = request("GET", "/metrics")
+    body = metrics_response.text
+    assert metrics_response.status_code == 200
+    assert metrics_response.headers["content-type"].startswith("text/plain")
+    assert "# TYPE auction_agent_requests_total counter" in body
+    assert 'auction_agent_requests_total{source="fallback",task="host-cue"} 1' in body
+    assert "auction_agent_fallback_ratio 1.0" in body
+    assert "auction_agent_request_latency_ms_bucket{le=\"+Inf\"} 1" in body
+    assert "auction_agent_model_circuit_open 0" in body
+
+
+def test_prometheus_metrics_requires_service_token(monkeypatch):
+    monkeypatch.setenv("AGENT_SERVICE_TOKEN", "metrics-token")
+    unauthorized = request("GET", "/metrics")
+    authorized = request("GET", "/metrics", headers={"X-Agent-Service-Token": "metrics-token"})
+    assert unauthorized.status_code == 401
+    assert authorized.status_code == 200
+
+
 def test_prompt_injection_is_blocked_before_model_call(monkeypatch):
     monkeypatch.setenv("AI_API_KEY", "should-not-be-used")
     monkeypatch.setenv("AI_API_URL", "https://invalid.test/chat")

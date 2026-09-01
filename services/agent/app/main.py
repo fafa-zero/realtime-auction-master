@@ -3,14 +3,15 @@ import json
 import os
 import time
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
 
 from .agent import model_circuit_breaker, run_agent
 from .config import load_local_env
 from .evaluation import run_evaluation
-from .metrics import snapshot as metrics_snapshot
+from .metrics import prometheus_snapshot, snapshot as metrics_snapshot
 from .observability import new_request_id, logger, request_id_var
 from .orchestrator import run_chat
+from .prometheus import render_metrics
 from .schemas import AgentRunRequest, AiResult, ChatRequest, ChatResponse
 from .tools import list_tools
 
@@ -84,6 +85,18 @@ async def metrics() -> dict[str, object]:
         "consecutiveFailures": circuit.consecutive_failures,
     }
     return payload
+
+
+@app.get("/metrics", dependencies=[Depends(require_service_auth)])
+async def prometheus_metrics() -> Response:
+    """Expose aggregate telemetry in the Prometheus text exposition format."""
+    circuit = model_circuit_breaker.snapshot()
+    body = render_metrics(
+        prometheus_snapshot(),
+        circuit_state=circuit.state,
+        circuit_failures=circuit.consecutive_failures,
+    )
+    return Response(content=body, media_type="text/plain; version=0.0.4")
 
 
 @app.get("/v1/evaluation", dependencies=[Depends(require_service_auth)])

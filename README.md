@@ -149,14 +149,15 @@ Agent 内部观测接口：
 
 ```text
 GET http://localhost:8100/v1/metrics
+GET http://localhost:8100/metrics
 GET http://localhost:8100/v1/evaluation
 ```
 
-如果配置了 `AGENT_SERVICE_TOKEN`，请求需要携带 `X-Agent-Service-Token`。`/v1/metrics` 只返回聚合延迟、来源、兜底率和工具调用信息；`/v1/evaluation` 不调用远程模型，适合在 CI 或面试演示中重复运行。
+如果配置了 `AGENT_SERVICE_TOKEN`，请求需要携带 `X-Agent-Service-Token`。`/v1/metrics` 返回 JSON 聚合延迟、来源、兜底率和工具调用信息，`/metrics` 返回 Prometheus 标准文本指标；`/v1/evaluation` 不调用远程模型，适合在 CI 或面试演示中重复运行。
 
 ### Docker Compose
 
-项目提供了 Node、FastAPI、MySQL 和 Redis 的本地编排。默认使用 MySQL 持久化，Redis 为后续实时事件和缓存扩展预留：
+项目提供了 Node、FastAPI、MySQL 和 Redis 的本地编排。默认使用 MySQL 持久化，Redis 负责跨实例实时事件桥和短期快照缓存：
 
 ```bash
 docker compose up --build

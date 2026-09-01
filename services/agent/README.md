@@ -38,7 +38,8 @@ npm run test:agent-contract
 
 - `GET /health`
 - `GET /v1/tools`
-- `GET /v1/metrics`（内部鉴权；延迟、来源、兜底率和最近调用）
+- `GET /v1/metrics`（内部鉴权；JSON 延迟、来源、兜底率和最近调用）
+- `GET /metrics`（内部鉴权；Prometheus 文本指标，可供 Prometheus 抓取）
 - `GET /v1/evaluation`（内部鉴权；离线路由、RAG 和工具回归评测）
 - `POST /v1/agent/run`
 - `POST /v1/agent/chat`
@@ -56,7 +57,7 @@ Agent 响应会额外包含 `toolsUsed` 和 `toolResults`，用于调试、自�
 
 ## 观测与评测
 
-指标是进程内的有界聚合数据，不保存提示词、用户 ID 或 API Key。生产环境可由监控系统定时抓取 `/v1/metrics`，再替换为 Prometheus/OpenTelemetry exporter。指标包括总请求数、错误数、模型/兜底来源、平均与 P95 延迟、按任务统计和最近调用的工具列表。
+指标是进程内的有界聚合数据，不保存提示词、用户 ID 或 API Key。`/v1/metrics` 继续提供 JSON 调试视图，`/metrics` 提供 Prometheus 文本格式的累计请求、失败、兜底、任务/来源标签、全量延迟 histogram、模型熔断状态和进程运行时间。
 
 模型访问对超时、HTTP 408/425/429 和 5xx 临时错误执行有限次指数退避重试；连续失败达到阈值后进入熔断，短暂等待后允许一次恢复探测。鉴权错误和其他 4xx 不重试，避免放大配置问题。
 

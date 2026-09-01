@@ -19,7 +19,7 @@
 | 安全测试 | Prompt Injection、系统提示泄露、出价/支付越权请求均在模型调用前拦截 |
 | 服务契约 | Node -> FastAPI snake_case 请求、鉴权头、响应字段和追踪 ID 有独立契约测试 |
 | 工程交付 | Docker Compose、健康检查、GitHub Actions 多 Job CI |
-| 可观测性 | `/v1/metrics` 统计延迟、来源、兜底率、任务和工具使用情况 |
+| 可观测性 | `/v1/metrics` 提供 JSON 调试视图，`/metrics` 提供 Prometheus 累计指标和延迟 histogram |
 
 ## 面试演示路径
 
@@ -28,18 +28,18 @@
 3. 连续发送两条 `/api/agent/chat` 消息，展示意图变化、知识引用和 `historySize`。
 4. 暂时不配置模型 Key，说明服务仍由确定性 fallback 保持可用；再配置兼容 OpenAI 的 Key，比较 `source: model` 与 `source: fallback`。
 5. 运行 `npm run eval:agent`，展示无需网络的四条 Agent 回归用例。
-6. 访问 `/v1/metrics`，说明如何观察 P95 延迟和兜底率，并指出生产环境可替换为 Prometheus/OpenTelemetry exporter。
+6. 访问 `/v1/metrics` 观察 P95 延迟和兜底率，再抓取 `/metrics` 展示 Prometheus counter、histogram 和模型熔断状态。
 
 ## 可以写进简历的描述
 
 - 使用 FastAPI 构建独立 Python Agent sidecar，设计 Node-to-Agent 结构化上下文协议，避免 Agent 直接修改竞拍、订单和支付状态。
 - 实现意图路由、可解释风险工具、固定工具计划、轻量 RAG 和用户级短期记忆；模型不可用时自动降级到确定性本地策略。
 - 建立 pytest + WebSocket + Playwright + Locust 的分层测试体系，并加入无模型 Key 的离线评测门禁和 GitHub Actions CI。
-- 增加 Agent 延迟、模型/兜底来源、失败数、P95 和工具调用指标，支持用数据定位模型超时与回退问题。
+- 增加 Agent 延迟 histogram、模型/兜底来源、失败数、P95 和工具调用指标，并提供 Prometheus 抓取端点定位模型超时与回退问题。
 - 为模型临时故障加入有限重试、指数退避和熔断恢复；为 Node-FastAPI 协议加入独立契约测试。
 
 ## 诚实的工程边界
 
-- 当前会话记忆是单进程内存，重启后清空；多副本部署时应迁移到 Redis 或数据库。
+- 会话记忆优先写入 Redis；Redis 不可用时自动回退到有界进程内存，回退数据会随重启清空。
 - RAG 是依赖轻量的词法检索，数据规模扩大后可替换为向量索引，但保留当前 citations 合同。
-- Redis 已在 Compose 中预留，尚未接入实时事件和缓存逻辑；Node 仍是竞拍状态唯一写入方。
+- Redis 已用于会话记忆、跨 Node 实例事件桥和短期快照缓存；Node 状态机及 MySQL/JSON 仍是竞拍交易事实来源，多写入实例尚需锁或单写入者设计。

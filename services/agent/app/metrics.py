@@ -15,10 +15,15 @@ _started_at = time.time()
 _lock = Lock()
 _total_requests = 0
 _total_failures = 0
+_total_fallbacks = 0
 _by_task: Counter[str] = Counter()
 _by_source: Counter[str] = Counter()
+_by_task_source: Counter[tuple[str, str]] = Counter()
 _latencies_ms: deque[float] = deque(maxlen=500)
 _recent: deque[dict[str, Any]] = deque(maxlen=100)
+_latency_buckets = (5, 10, 25, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000)
+_latency_bucket_counts: Counter[int] = Counter()
+_latency_sum_ms = 0.0
 
 
 def record_request(
@@ -32,15 +37,22 @@ def record_request(
     request_id: str = "-",
 ) -> None:
     """Record one completed Agent request without retaining request content."""
-    global _total_requests, _total_failures
+    global _total_requests, _total_failures, _total_fallbacks, _latency_sum_ms
     bounded_latency = max(0.0, round(float(latency_ms), 2))
     with _lock:
         _total_requests += 1
         if failed:
             _total_failures += 1
+        if fallback and not failed:
+            _total_fallbacks += 1
         _by_task[task] += 1
         _by_source[source] += 1
+        _by_task_source[(task, source)] += 1
         _latencies_ms.append(bounded_latency)
+        _latency_sum_ms += bounded_latency
+        for bucket in _latency_buckets:
+            if bounded_latency <= bucket:
+                _latency_bucket_counts[bucket] += 1
         _recent.append(
             {
                 "task": task,
@@ -67,13 +79,14 @@ def snapshot() -> dict[str, Any]:
     """Return a JSON-serializable snapshot suitable for an internal endpoint."""
     with _lock:
         total = _total_requests
-        fallback_count = _by_source.get("fallback", 0)
+        fallback_count = _total_fallbacks
         values = list(_latencies_ms)
         return {
             "ok": True,
             "uptimeSeconds": max(0, int(time.time() - _started_at)),
             "totalRequests": total,
             "totalFailures": _total_failures,
+            "totalFallbacks": fallback_count,
             "fallbackRate": round(fallback_count / total, 4) if total else 0.0,
             "averageLatencyMs": round(sum(values) / len(values), 2) if values else 0.0,
             "p95LatencyMs": _percentile(values, 95),
@@ -83,14 +96,33 @@ def snapshot() -> dict[str, Any]:
         }
 
 
+def prometheus_snapshot() -> dict[str, Any]:
+    """Return cumulative values needed to render a Prometheus scrape."""
+    with _lock:
+        return {
+            "uptimeSeconds": max(0, time.time() - _started_at),
+            "totalRequests": _total_requests,
+            "totalFailures": _total_failures,
+            "totalFallbacks": _total_fallbacks,
+            "byTaskSource": dict(_by_task_source),
+            "latencyBuckets": {str(bucket): _latency_bucket_counts.get(bucket, 0) for bucket in _latency_buckets},
+            "latencyCount": _total_requests,
+            "latencySumMs": _latency_sum_ms,
+        }
+
+
 def reset() -> None:
     """Reset metrics for isolated tests and local evaluation runs."""
-    global _started_at, _total_requests, _total_failures
+    global _started_at, _total_requests, _total_failures, _total_fallbacks, _latency_sum_ms
     with _lock:
         _started_at = time.time()
         _total_requests = 0
         _total_failures = 0
+        _total_fallbacks = 0
         _by_task.clear()
         _by_source.clear()
+        _by_task_source.clear()
         _latencies_ms.clear()
         _recent.clear()
+        _latency_bucket_counts.clear()
+        _latency_sum_ms = 0.0
