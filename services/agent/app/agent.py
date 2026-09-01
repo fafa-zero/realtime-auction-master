@@ -10,6 +10,7 @@ import httpx
 from .config import env_float, env_int, load_local_env
 from .metrics import record_request
 from .observability import get_request_id
+from .policy import SAFE_BLOCK_MESSAGE, detect_policy_violation
 from .reliability import CircuitBreaker, CircuitOpenError
 from .schemas import AgentRunRequest, AiResult
 from .tools import run_tool_plan
@@ -90,6 +91,12 @@ def _extract_content(data: dict[str, Any]) -> str:
 async def _run_agent(request: AgentRunRequest) -> AiResult:
     """Run one bounded agent task with a deterministic local fallback."""
     tool_results, tools_used = run_tool_plan(request.task, request.context)
+    violation = detect_policy_violation(f"{request.system_prompt}\n{request.user_prompt}")
+    if violation:
+        blocked = _fallback(request, f"检测到受限请求（{violation}），{SAFE_BLOCK_MESSAGE}", tools_used, tool_results)
+        if hasattr(blocked, "model_copy"):
+            return blocked.model_copy(update={"content": SAFE_BLOCK_MESSAGE})
+        return blocked.copy(update={"content": SAFE_BLOCK_MESSAGE})
     tool_context = json.dumps(tool_results, ensure_ascii=False, separators=(",", ":"))
     enriched_user_prompt = (
         f"{request.user_prompt}\n\n以下是 Agent 工具读取到的结构化上下文，请以此为准：\n{tool_context}"

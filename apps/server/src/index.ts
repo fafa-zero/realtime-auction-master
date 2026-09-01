@@ -58,6 +58,7 @@ import {
 import type { ProductImportRow } from "./store.js";
 import { parseSpreadsheet, type SpreadsheetRecord } from "./spreadsheet.js";
 import { resolveMiniprogramLogin } from "./wechat.js";
+import { completeWithAgentChat } from "./ai.js";
 
 const PORT = Number(process.env.PORT ?? 4200);
 const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5174";
@@ -290,7 +291,7 @@ app.post("/api/auth/miniprogram/login", async (req, res) => {
     const input = schema.parse(req.body ?? {});
     const login = await resolveMiniprogramLogin(input);
     const result = loginMiniprogram({ ...input, openId: login.openId });
-    res.json({ ok: true, ...result });
+    res.json(result);
   } catch (error) {
     res.status(401).json({ ok: false, message: getErrorMessage(error) });
   }
@@ -1056,6 +1057,89 @@ app.post("/api/ai/bid-risk", async (req, res) => {
     res.json(await detectBidRisk({ ...input, liveRoomId }));
   } catch (error) {
     res.status(getErrorStatus(error)).json(createAiErrorResponse(getErrorMessage(error)));
+  }
+});
+
+app.post("/api/agent/chat", async (req, res) => {
+  try {
+    const schema = z.object({
+      liveRoomId: z.string().min(1).optional(),
+      sessionId: z.string().regex(/^[A-Za-z0-9:_-]{1,80}$/, "会话 ID 格式不正确").optional(),
+      message: z.string().min(1, "消息不能为空").max(1_000, "消息不能超过 1000 个字符")
+    });
+    const input = schema.parse(req.body ?? {});
+    const user = getUserByToken(getAuthToken(req));
+    const liveRoomId = input.liveRoomId ?? DEFAULT_LIVE_ROOM_ID;
+    const liveRoom = getLiveRoom(liveRoomId);
+    const snapshot = getSnapshot(liveRoomId);
+    const sessionId = input.sessionId ?? "default";
+    const history = getAuctionHistory(liveRoomId).slice(0, 10).map((item) => ({
+      status: item.auction.status,
+      currentPrice: item.auction.currentPrice,
+      participantCount: item.participantCount,
+      bidCount: item.bids.length,
+      productName: item.product.name,
+      archivedAt: item.archivedAt
+    }));
+    const context = {
+      liveRoom: {
+        id: liveRoom.id,
+        title: liveRoom.title,
+        hostName: liveRoom.hostName,
+        viewerCount: liveRoom.viewerCount
+      },
+      product: {
+        id: snapshot.product.id,
+        name: snapshot.product.name,
+        description: snapshot.product.description,
+        startPrice: snapshot.auction.startPrice,
+        incrementStep: snapshot.auction.incrementStep,
+        ceilingPrice: snapshot.auction.ceilingPrice,
+        durationSeconds: snapshot.auction.durationSeconds,
+        stock: snapshot.product.stock,
+        sellingPoints: snapshot.product.sellingPoints,
+        scriptKeywords: snapshot.product.scriptKeywords
+      },
+      auction: {
+        status: snapshot.auction.status,
+        currentPrice: snapshot.auction.currentPrice,
+        startPrice: snapshot.auction.startPrice,
+        incrementStep: snapshot.auction.incrementStep,
+        ceilingPrice: snapshot.auction.ceilingPrice,
+        durationSeconds: snapshot.auction.durationSeconds,
+        startTime: snapshot.auction.startTime,
+        endTime: snapshot.auction.endTime,
+        extendCount: snapshot.auction.extendCount
+      },
+      order: snapshot.order
+        ? { status: snapshot.order.status, finalPrice: snapshot.order.finalPrice }
+        : null,
+      bids: snapshot.bids.slice(0, 30).map((bid) => ({
+        nickname: bid.nickname,
+        price: bid.price,
+        createdAt: bid.createdAt
+      })),
+      participantCount: snapshot.participantCount,
+      recentDanmaku: getDanmakuMessages(liveRoomId).slice(0, 10).map((item) => `${item.nickname}：${item.content}`),
+      history,
+      serverTime: snapshot.serverTime
+    };
+    const result = await completeWithAgentChat({
+      message: input.message,
+      sessionId,
+      userId: user.id,
+      userRole: user.role,
+      liveRoomId,
+      context,
+      requestId: req.header("x-request-id")
+    });
+    writeAuditLog(user, "AGENT_CHAT", {
+      liveRoomId,
+      detail: { sessionId, intent: result.intent, toolsUsed: result.toolsUsed ?? [] }
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
   }
 });
 
