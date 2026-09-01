@@ -17,6 +17,7 @@ import {
   PlayCircle,
   Radio,
   Save,
+  Send,
   RotateCcw,
   Trash2,
   ShieldAlert,
@@ -65,11 +66,28 @@ type AiResult = {
   title: string;
   content: string;
   generatedAt: number;
-  source: "model" | "fallback";
+  source: "agent" | "model" | "fallback";
   fallback?: boolean;
   message?: string;
+  toolsUsed?: string[];
+  toolResults?: Record<string, unknown>;
   level?: string;
   product?: AuctionSnapshot["product"];
+};
+
+type AgentChatResult = AiResult & {
+  sessionId: string;
+  intent: string;
+  citations?: Array<{ id: string; title: string; content: string; score: number }>;
+  historySize?: number;
+};
+
+type AgentChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+  createdAt: number;
+  intent?: string;
+  toolsUsed?: string[];
 };
 
 type WebSession = {
@@ -125,6 +143,7 @@ type PayOrderResponse =
 
 type AiTask = "script" | "summary" | "cue" | "risk";
 type ViewMode = "host" | "buyer";
+type SyncSource = "socket" | "polling" | "rest" | "offline";
 type AppRoute = {
   viewMode: ViewMode;
   liveRoomId: string;
@@ -171,6 +190,8 @@ export function App() {
   const [liveRoom, setLiveRoom] = useState<LiveRoom | null>(null);
   const [liveRooms, setLiveRooms] = useState<LiveRoom[]>([]);
   const [connected, setConnected] = useState(false);
+  const [syncSource, setSyncSource] = useState<SyncSource>("offline");
+  const [lastSyncAt, setLastSyncAt] = useState<number | null>(null);
   const [nickname, setNickname] = useState(() => `用户${Math.floor(Math.random() * 90 + 10)}`);
   const [bidPrice, setBidPrice] = useState("");
   const [durationSeconds, setDurationSeconds] = useState("90");
@@ -184,6 +205,9 @@ export function App() {
   const [aiResult, setAiResult] = useState<AiResult | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiTask, setAiTask] = useState<AiTask | null>(null);
+  const [agentChatInput, setAgentChatInput] = useState("");
+  const [agentChatMessages, setAgentChatMessages] = useState<AgentChatMessage[]>([]);
+  const [agentChatLoading, setAgentChatLoading] = useState(false);
   const [historyItems, setHistoryItems] = useState<AuctionHistoryItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [productQueue, setProductQueue] = useState<ProductQueueItem[]>([]);
@@ -202,6 +226,7 @@ export function App() {
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const socketRef = useRef<Socket | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const agentChatSessionIdRef = useRef(`web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   const currentUser = session?.user ?? null;
   const userId = currentUser?.id ?? "guest-web";
   const viewMode = route.viewMode;
@@ -259,6 +284,11 @@ export function App() {
       setNickname(currentUser.nickname);
     }
   }, [currentUser?.nickname]);
+
+  useEffect(() => {
+    setAgentChatMessages([]);
+    setAgentChatInput("");
+  }, [liveRoomId]);
 
   useEffect(() => {
     if (
@@ -319,7 +349,90 @@ export function App() {
     setAuditLogs([]);
     setLoadError(null);
     setConnected(false);
+    setSyncSource("offline");
+    setLastSyncAt(null);
     setMessage(`正在进入直播间 ${liveRoomId}...`);
+
+    let realtimeConnected = false;
+    let pollingTimer: number | null = null;
+    let pollInFlight = false;
+
+    const stopPolling = () => {
+      if (pollingTimer !== null) {
+        window.clearTimeout(pollingTimer);
+        pollingTimer = null;
+      }
+    };
+
+    const updateSnapshot = (data: AuctionSnapshot, source: Exclude<SyncSource, "offline"> = "socket") => {
+      if (!data?.auction || data.auction.liveRoomId !== liveRoomId) {
+        return false;
+      }
+
+      syncSnapshotClock(data);
+      setLastSyncAt(Date.now());
+      setSyncSource(source);
+      setSnapshot((current) => {
+        if (
+          current &&
+          (data.auction.version < current.auction.version ||
+            (data.auction.version === current.auction.version && data.serverTime < current.serverTime)) &&
+          !isDemoResetSnapshot(data)
+        ) {
+          return current;
+        }
+
+        syncAuctionInputs(data);
+        return data;
+      });
+      return true;
+    };
+
+    const pollSnapshot = async () => {
+      if (cancelled || realtimeConnected || pollInFlight) {
+        return;
+      }
+
+      pollInFlight = true;
+      try {
+        const response = await fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/auction`);
+        const data = await readJson<AuctionSnapshot & { message?: string }>(response);
+        if (!response.ok) {
+          throw new Error(data.message ?? "快照同步失败");
+        }
+
+        if (!cancelled && !realtimeConnected) {
+          updateSnapshot(data, "polling");
+        }
+      } catch {
+        if (!cancelled && !realtimeConnected) {
+          setSyncSource("offline");
+        }
+      } finally {
+        pollInFlight = false;
+      }
+    };
+
+    const schedulePolling = () => {
+      if (cancelled) {
+        return;
+      }
+
+      stopPolling();
+      pollingTimer = window.setTimeout(async () => {
+        if (!realtimeConnected) {
+          await pollSnapshot();
+        }
+        schedulePolling();
+      }, realtimeConnected ? 8_000 : 1_500);
+    };
+
+    const startPolling = () => {
+      if (!realtimeConnected) {
+        setSyncSource("polling");
+      }
+      schedulePolling();
+    };
 
     async function loadInitialData() {
       try {
@@ -343,12 +456,7 @@ export function App() {
         }
 
         setLiveRoom(roomData.room ?? null);
-        syncSnapshotClock(auctionData);
-        setSnapshot(auctionData);
-        setBidPrice(String(auctionData.auction.currentPrice + auctionData.auction.incrementStep));
-        setDurationSeconds(String(auctionData.auction.durationSeconds));
-        setIncrementStep(String(auctionData.auction.incrementStep));
-        setCeilingPrice(String(auctionData.auction.ceilingPrice));
+        updateSnapshot(auctionData, "rest");
         void refreshArchiveData();
         void refreshProductQueue();
         void refreshDanmakuBlockedUsers();
@@ -364,6 +472,7 @@ export function App() {
     }
 
     void loadInitialData();
+    startPolling();
 
     const socket = io(API_URL, {
       transports: ["websocket", "polling"],
@@ -374,35 +483,26 @@ export function App() {
     socketRef.current = socket;
 
     socket.on("connect", () => {
+      if (cancelled) {
+        return;
+      }
+      realtimeConnected = true;
       setConnected(true);
+      stopPolling();
+      setSyncSource("socket");
       setMessage("已连接实时竞拍服务");
       socket.emit("auction:join", { liveRoomId });
     });
 
     socket.on("disconnect", () => {
+      if (cancelled) {
+        return;
+      }
+      realtimeConnected = false;
       setConnected(false);
+      startPolling();
       setMessage("连接已断开，正在自动重连");
     });
-
-    const updateSnapshot = (data: AuctionSnapshot) => {
-      if (data.auction.liveRoomId !== liveRoomId) {
-        return false;
-      }
-
-      syncSnapshotClock(data);
-      setSnapshot((current) => {
-        if (current && data.auction.version < current.auction.version) {
-          return current;
-        }
-
-        setBidPrice(String(data.auction.currentPrice + data.auction.incrementStep));
-        setDurationSeconds(String(data.auction.durationSeconds));
-        setIncrementStep(String(data.auction.incrementStep));
-        setCeilingPrice(String(data.auction.ceilingPrice));
-        return data;
-      });
-      return true;
-    };
 
     socket.on("auction:snapshot", updateSnapshot);
     socket.on("danmaku:history", (items: DanmakuMessage[]) => {
@@ -486,7 +586,12 @@ export function App() {
       setMessage(data.message ?? "实时消息订阅失败");
     });
     socket.on("connect_error", (error) => {
+      if (cancelled) {
+        return;
+      }
+      realtimeConnected = false;
       setConnected(false);
+      startPolling();
       setMessage(error.message || "实时连接鉴权失败，请重新登录");
     });
 
@@ -496,6 +601,8 @@ export function App() {
 
     return () => {
       cancelled = true;
+      realtimeConnected = false;
+      stopPolling();
       socket.disconnect();
     };
   }, [liveRoomId, route.home, route.notFound, session?.token, viewMode]);
@@ -555,7 +662,16 @@ export function App() {
   );
   const stageLabel = snapshot ? getStageLabel(snapshot.auction.status) : "";
   const stageDetail = snapshot ? getStageDetail(snapshot, remaining) : "";
-  const syncLabel = connected && snapshot ? `同步版本 v${snapshot.auction.version}` : "等待实时同步";
+  const syncLabel = snapshot ? `同步版本 v${snapshot.auction.version}` : "等待实时同步";
+  const syncTransportLabel =
+    syncSource === "socket"
+      ? "Socket.IO 实时广播"
+      : syncSource === "polling"
+        ? "REST 快照兜底同步"
+        : syncSource === "rest"
+          ? "HTTP 快照同步"
+          : "等待连接恢复";
+  const lastSyncLabel = lastSyncAt ? `最近同步 ${formatTime(lastSyncAt)}` : "尚未同步";
   const myHistory = historyItems.filter((item) =>
     item.bids.some((bid) => bid.userId === userId || bid.nickname === nickname)
   );
@@ -588,6 +704,7 @@ export function App() {
       currentUser?.id === snapshot.order.buyerUserId &&
       snapshot.order.status !== "PAID"
   );
+  const roleMismatchMessage = getRoleMismatchMessage(viewMode, currentUser);
 
   async function handleDemoLogin(role: "HOST" | "BUYER") {
     setAuthMessage("正在登录演示账号...");
@@ -937,13 +1054,68 @@ export function App() {
       void refreshProductQueue();
       setMessage(
         data.message ??
-          (data.source === "model" ? "AI 助手已生成结果" : "已使用本地 AI 兜底策略生成结果")
+          (data.source === "fallback" ? "已使用本地 AI 兜底策略生成结果" : "AI 助手已生成结果")
       );
     } catch {
       setMessage("AI 助手暂时不可用，请稍后重试");
     } finally {
       setAiLoading(false);
       setAiTask(null);
+    }
+  }
+
+  async function sendAgentChat() {
+    const content = agentChatInput.trim();
+
+    if (!content) {
+      setMessage("请输入 Agent 消息");
+      return;
+    }
+
+    if (!session?.token) {
+      setMessage("登录后才能使用 Agent 对话");
+      return;
+    }
+
+    setAgentChatInput("");
+    setAgentChatLoading(true);
+    setAgentChatMessages((current) => [
+      ...current,
+      { role: "user", content, createdAt: Date.now() }
+    ]);
+
+    try {
+      const res = await fetch(`${API_URL}/api/agent/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders(session) },
+        body: JSON.stringify({
+          liveRoomId,
+          sessionId: agentChatSessionIdRef.current,
+          message: content
+        })
+      });
+      const data = await readJson<AgentChatResult & { message?: string }>(res);
+
+      if (!res.ok || !data.content) {
+        setMessage(data.message ?? "Agent 对话失败");
+        return;
+      }
+
+      setAgentChatMessages((current) => [
+        ...current,
+        {
+          role: "assistant",
+          content: data.content,
+          createdAt: data.generatedAt,
+          intent: data.intent,
+          toolsUsed: data.toolsUsed
+        }
+      ]);
+      setMessage(data.message ?? "Agent 已完成回答");
+    } catch {
+      setMessage("Agent 服务暂时不可用，请稍后重试");
+    } finally {
+      setAgentChatLoading(false);
     }
   }
 
@@ -981,7 +1153,7 @@ export function App() {
     void refreshArchiveData();
   }
 
-  async function refreshArchiveData() {
+  async function refreshArchiveData(authSession = session) {
     try {
       const ordersUrl =
         viewMode === "buyer"
@@ -990,13 +1162,13 @@ export function App() {
       const ordersInit =
         viewMode === "buyer"
           ? {
-              headers: getAuthHeaders(session)
+              headers: getAuthHeaders(authSession)
             }
           : {
-              headers: getAuthHeaders(session)
+              headers: getAuthHeaders(authSession)
             };
       const historyInit = {
-        headers: getAuthHeaders(session)
+        headers: getAuthHeaders(authSession)
       };
       const [historyRes, ordersRes] = await Promise.all([
         fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/auction/history`, historyInit),
@@ -1027,14 +1199,14 @@ export function App() {
     }
   }
 
-  async function refreshAuditLogs() {
+  async function refreshAuditLogs(authSession = session) {
     if (viewMode !== "host") {
       return;
     }
 
     try {
       const res = await fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/audit-logs`, {
-        headers: getAuthHeaders(session)
+        headers: getAuthHeaders(authSession)
       });
       const data = await readJson<{ items?: AuditLog[]; message?: string }>(res);
 
@@ -1178,7 +1350,7 @@ export function App() {
       const nextSnapshot = data.snapshots?.find((item) => item.auction.liveRoomId === liveRoomId) ?? null;
 
       if (nextSnapshot) {
-        setSnapshot(nextSnapshot);
+        applySnapshot(nextSnapshot);
       }
 
       setDanmakuMessages([]);
@@ -1189,15 +1361,21 @@ export function App() {
       clearProductForm();
       setMessage("演示数据已重置");
 
+      let refreshSession = session;
+
       if (session?.user.account === "demo-host") {
         const nextSession = await loginWeb(demoWebAccounts.HOST);
+        refreshSession = nextSession;
         setSession(nextSession);
         writeStoredSession(nextSession);
-      } else {
-        setSession(null);
-        writeStoredSession(null);
       }
 
+      await Promise.all([
+        refreshArchiveData(refreshSession),
+        refreshProductQueue(),
+        refreshDanmakuBlockedUsers(refreshSession),
+        refreshAuditLogs(refreshSession)
+      ]);
       navigateTo("/host?liveRoomId=live-1", setRoute);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "重置演示数据失败");
@@ -1206,14 +1384,14 @@ export function App() {
     }
   }
 
-  async function refreshDanmakuBlockedUsers() {
+  async function refreshDanmakuBlockedUsers(authSession = session) {
     if (viewMode !== "host") {
       return;
     }
 
     try {
       const res = await fetch(`${API_URL}/api/live-rooms/${encodeURIComponent(liveRoomId)}/danmaku/blocked-users`, {
-        headers: getAuthHeaders(session)
+        headers: getAuthHeaders(authSession)
       });
       const data = await readJson<{ items?: DanmakuBlockedUser[]; message?: string }>(res);
 
@@ -1223,6 +1401,32 @@ export function App() {
     } catch {
       // Moderation list is secondary; keep the live room usable.
     }
+  }
+
+  function applySnapshot(data: AuctionSnapshot, source: Exclude<SyncSource, "offline"> = "rest") {
+    setServerOffset(data.serverTime - Date.now());
+    setLastSyncAt(Date.now());
+    setSyncSource(source);
+    syncAuctionInputs(data);
+    setSnapshot(data);
+  }
+
+  function syncAuctionInputs(data: AuctionSnapshot) {
+    setBidPrice(String(data.auction.currentPrice + data.auction.incrementStep));
+    setDurationSeconds(String(data.auction.durationSeconds));
+    setIncrementStep(String(data.auction.incrementStep));
+    setCeilingPrice(String(data.auction.ceilingPrice));
+  }
+
+  function isDemoResetSnapshot(data: AuctionSnapshot) {
+    return (
+      data.auction.status === "PENDING" &&
+      data.auction.version === 1 &&
+      data.auction.startTime === null &&
+      data.auction.endTime === null &&
+      data.bids.length === 0 &&
+      data.order === null
+    );
   }
 
   async function retractDanmaku(messageId: string) {
@@ -1377,7 +1581,7 @@ export function App() {
   if (route.home) {
     return (
       <HomeRoute
-        liveRoomId={liveRooms[0]?.id ?? DEFAULT_LIVE_ROOM_ID}
+        liveRooms={liveRooms}
         session={session}
         authChecked={authChecked}
         message={authMessage}
@@ -1417,6 +1621,20 @@ export function App() {
           onDemoLogin={handleDemoLogin}
           onLogin={handleManualLogin}
           onRegister={handleRegister}
+        />
+      </>
+    );
+  }
+
+  if (roleMismatchMessage) {
+    return (
+      <>
+        {renderFloatingBackButton()}
+        <RouteError
+          title="账号角色不匹配"
+          message={roleMismatchMessage}
+          onGoHost={() => navigateTo("/host", setRoute)}
+          onGoLive={() => navigateTo(`/live/${DEFAULT_LIVE_ROOM_ID}`, setRoute)}
         />
       </>
     );
@@ -1474,26 +1692,31 @@ export function App() {
               <p className="eyebrow">实时竞拍大师</p>
               <h1>{viewMode === "host" ? "直播间竞拍控制台" : "观众实时竞拍台"}</h1>
               <p className="topbar-meta">
-                {syncLabel} / {currentUser ? currentUser.nickname : "未登录访客"} / Socket.IO 多端广播
+                {syncLabel} / {currentUser ? currentUser.nickname : "未登录访客"} / {syncTransportLabel}
               </p>
             </div>
           </div>
           <div className="topbar-actions">
-            {viewMode === "host" ? (
-              <label className="room-select">
-                <span>直播间</span>
-                <select
-                  value={liveRoomId}
-                  onChange={(event) => navigateTo(`/host?liveRoomId=${encodeURIComponent(event.target.value)}`, setRoute)}
-                >
-                  {(liveRooms.length > 0 ? liveRooms : liveRoom ? [liveRoom] : []).map((room) => (
-                    <option value={room.id} key={room.id}>
-                      {room.title}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
+            <label className="room-select">
+              <span>直播间</span>
+              <select
+                value={liveRoomId}
+                onChange={(event) =>
+                  navigateTo(
+                    viewMode === "host"
+                      ? `/host?liveRoomId=${encodeURIComponent(event.target.value)}`
+                      : `/live/${encodeURIComponent(event.target.value)}`,
+                    setRoute
+                  )
+                }
+              >
+                {(liveRooms.length > 0 ? liveRooms : liveRoom ? [liveRoom] : []).map((room) => (
+                  <option value={room.id} key={room.id}>
+                    {room.title}
+                  </option>
+                ))}
+              </select>
+            </label>
             <div className="mode-switch" aria-label="视图切换">
               <button
                 className={viewMode === "host" ? "active" : ""}
@@ -1512,7 +1735,7 @@ export function App() {
             </div>
             <div className={connected ? "connection online" : "connection offline"}>
               {connected ? <Wifi size={18} /> : <WifiOff size={18} />}
-              {connected ? "实时连接" : "重连中"}
+              {connected ? "实时连接" : syncSource === "polling" ? "轮询兜底" : "重连中"}
             </div>
             {session ? (
               <button className="icon-button" title="退出登录" onClick={handleLogout}>
@@ -1666,7 +1889,7 @@ export function App() {
         </div>
         <div className="sync-strip">
           <span>{syncLabel}</span>
-          <span>{connected ? "实时广播已开启" : "正在恢复连接"}</span>
+          <span>{syncTransportLabel} / {lastSyncLabel}</span>
         </div>
 
         <section className="panel-section">
@@ -2017,9 +2240,12 @@ export function App() {
             </section>
 
             <section className="panel-section">
-              <div className="section-title">
+              <div className="section-title section-title-copy">
                 <Bot size={18} />
-                <h2>AI 竞拍助手</h2>
+                <div>
+                  <h2>AI 快捷生成</h2>
+                  <p>一键生成讲解词、主播话术和竞拍分析</p>
+                </div>
               </div>
               <div className="button-row ai-actions">
                 <button disabled={aiLoading} onClick={() => runAiTask("script")}>
@@ -2055,7 +2281,7 @@ export function App() {
                   </div>
                   <div className="ai-meta">
                     <span className={`source-badge source-${aiResult.source}`}>
-                      {aiResult.source === "model" ? "模型生成" : "本地兜底"}
+                      {aiResult.source === "fallback" ? "本地兜底" : aiResult.source === "agent" ? "Agent 生成" : "模型生成"}
                     </span>
                     {aiResult.level ? (
                       <span className={`risk-badge risk-${getRiskClass(aiResult.level)}`}>
@@ -2072,6 +2298,56 @@ export function App() {
                   <p>可生成商品讲解词、竞拍复盘、主播话术或异常出价提示。</p>
                 </div>
               )}
+              <div className="agent-chat">
+                <div className="agent-chat-heading">
+                  <div>
+                    <strong>Agent 智能工作台</strong>
+                    <small>结合当前直播间连续追问</small>
+                  </div>
+                  {agentChatMessages.length > 0 ? <span>{agentChatMessages.length} 条</span> : null}
+                </div>
+                {agentChatMessages.length > 0 ? (
+                  <div className="agent-chat-messages" role="log" aria-live="polite">
+                    {agentChatMessages.slice(-8).map((item, index) => (
+                      <div className={`agent-chat-message ${item.role}`} key={`${item.createdAt}-${index}`}>
+                        <span>{item.role === "user" ? "你" : "Agent"}</span>
+                        <p>{item.content}</p>
+                        {item.role === "assistant" && item.intent ? (
+                          <small>
+                            {item.intent}
+                            {item.toolsUsed?.length ? ` / ${item.toolsUsed.join(" / ")}` : ""}
+                          </small>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                <form
+                  className="agent-chat-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void sendAgentChat();
+                  }}
+                >
+                  <input
+                    value={agentChatInput}
+                    maxLength={1_000}
+                    placeholder="例如：分析当前竞拍并给我一句话术"
+                    aria-label="Agent 消息"
+                    disabled={agentChatLoading}
+                    onChange={(event) => setAgentChatInput(event.target.value)}
+                  />
+                  <button
+                    type="submit"
+                    disabled={agentChatLoading || !session?.token}
+                    title="发送 Agent 消息"
+                    aria-label="发送 Agent 消息"
+                  >
+                    <Send size={16} />
+                    <span>{agentChatLoading ? "处理中" : "发送"}</span>
+                  </button>
+                </form>
+              </div>
             </section>
 
             <section className="panel-section">
@@ -2497,7 +2773,7 @@ function HostSetupRoute(props: {
 }
 
 function HomeRoute(props: {
-  liveRoomId: string;
+  liveRooms: LiveRoom[];
   session: WebSession | null;
   authChecked: boolean;
   message: string;
@@ -2525,11 +2801,21 @@ function HomeRoute(props: {
             <Radio size={16} />
             商家/主播入口
           </button>
-          <button onClick={() => props.onGoLive(props.liveRoomId)}>
+          <button onClick={() => props.onGoLive(props.liveRooms[0]?.id ?? DEFAULT_LIVE_ROOM_ID)}>
             <Users size={16} />
             买家预览入口
           </button>
         </div>
+        {props.liveRooms.length > 0 ? (
+          <div className="home-room-list">
+            {props.liveRooms.map((room) => (
+              <button key={room.id} onClick={() => props.onGoLive(room.id)}>
+                <span>{room.title}</span>
+                <small>{room.hostName}</small>
+              </button>
+            ))}
+          </div>
+        ) : null}
         {!props.session ? (
           <button className="link-button" onClick={props.onShowRegister}>
             注册新账号
@@ -2759,6 +3045,22 @@ function getDanmakuSender(input: {
     userId: input.viewMode === "buyer" ? input.fallbackUserId : "guest-host",
     nickname: input.viewMode === "buyer" ? input.fallbackNickname.trim() || "Web 预览买家" : "演示主播"
   };
+}
+
+function getRoleMismatchMessage(viewMode: ViewMode, user: AuthUser | null) {
+  if (!user) {
+    return "";
+  }
+
+  if (viewMode === "buyer" && user.role !== "BUYER") {
+    return "买家端需要使用买家账号登录。请退出当前主播账号后，注册或登录买家账号。";
+  }
+
+  if (viewMode === "host" && user.role === "BUYER") {
+    return "主播端需要使用主播账号登录。请退出当前买家账号后，登录主播账号。";
+  }
+
+  return "";
 }
 
 function getHostDashboardStats(input: {

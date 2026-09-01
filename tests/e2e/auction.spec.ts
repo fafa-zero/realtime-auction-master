@@ -5,7 +5,19 @@ test("host can open the auction dashboard", async ({ page }) => {
   await page.goto("/host");
   await page.getByRole("button", { name: "使用商家演示账号" }).click();
   await expect(page.getByRole("heading", { name: "直播间竞拍控制台" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "AI 竞拍助手" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "AI 快捷生成" })).toBeVisible();
+  await expect(page.locator(".connection")).toContainText("实时连接");
+});
+
+
+test("auction dashboard does not overflow on a mobile viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/host");
+  await page.getByRole("button", { name: "使用商家演示账号" }).click();
+  await expect(page.getByRole("heading", { name: "直播间竞拍控制台" })).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth))
+    .toBe(true);
 });
 
 
@@ -32,8 +44,8 @@ test("host can use the Agent conversation surface", async ({ page }) => {
   });
   await page.goto("/host");
   await page.getByRole("button", { name: "使用商家演示账号" }).click();
-  await expect(page.getByText("Agent 对话", { exact: true })).toBeVisible();
-  await page.getByLabel("Agent 消息").fill("给我一句主播话术");
+  await expect(page.getByText("Agent 智能工作台", { exact: true })).toBeVisible();
+  await page.getByRole("textbox", { name: "Agent 消息" }).fill("给我一句主播话术");
   await page.getByRole("button", { name: "发送 Agent 消息" }).click();
   await expect(page.getByText("当前最高价 200 元，下一口 300 元起。")).toBeVisible();
   await expect(page.getByText("get_live_room_snapshot / generate_host_script")).toBeVisible();

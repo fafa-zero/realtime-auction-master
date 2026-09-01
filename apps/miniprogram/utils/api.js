@@ -1,7 +1,9 @@
 const API_BASE_URL_CANDIDATES = [
   "http://localhost:4300",
   "http://127.0.0.1:4300",
-  "http://172.29.96.253:4300"
+  "http://172.29.96.253:4300",
+  "http://localhost:4200",
+  "http://127.0.0.1:4200"
 ];
 const DEFAULT_API_BASE_URL = API_BASE_URL_CANDIDATES[0];
 const REQUEST_TIMEOUT_MS = 10000;
