@@ -32,6 +32,7 @@ https://github.com/fafa-zero/realtime-auction-master.git
 - 小程序：微信小程序原生 WXML / WXSS / JS
 - 数据：本地 JSON 文件或 MySQL
 - AI：中科大 LLM 网关 / DeepSeek / 其他兼容 OpenAI Chat Completions 风格的模型接口，可本地兜底
+- Agent：可选 Python FastAPI Agent sidecar，负责模型调用和工具编排
 
 ## 项目结构
 
@@ -92,6 +93,76 @@ npm run dev
 ```
 
 开发模式会同时启动后端和 Vite 前端。Vite 端口可能在被占用时自动变化；正式演示建议优先使用 `npm run demo` 的 `4300` 单端口模式。
+
+### 启动 Python Agent（可选）
+
+第一阶段新增了独立的 FastAPI Agent 服务。它不接管竞拍状态和 Socket.IO，只负责 AI/Agent 任务；Node 服务在配置 `AGENT_BASE_URL` 后会自动转发已有 `/api/ai/*` 请求。
+
+```bash
+cd /home/zyy/realtime-auction-master/services/agent
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 8100 --reload
+```
+
+另开终端启动 Node 服务，并在 `.env.local` 中增加：
+
+```bash
+AGENT_BASE_URL=http://127.0.0.1:8100
+# 可选：Node 和 Agent 之间启用内部鉴权
+AGENT_SERVICE_TOKEN=change-me
+```
+
+检查 Agent：
+
+```text
+http://127.0.0.1:8100/health
+```
+
+如果 Agent 未启动、超时或模型不可用，Node 仍会返回原有本地兜底文案，不影响竞拍主流程。
+
+### Agent 对话与测试开发
+
+第三阶段增加了登录态 Agent 对话接口：主播或买家可以用自然语言询问当前竞拍，Agent 会先识别意图、运行对应工具计划，再结合本地竞拍规则知识库和短期会话记忆生成回答。Agent 只读竞拍上下文，不直接修改价格、订单或支付状态。
+
+```text
+POST /api/agent/chat
+GET  http://127.0.0.1:8100/v1/tools
+```
+
+测试入口位于 `tests/`：
+
+```bash
+npm run test:agent       # Agent 编排、工具、记忆和 RAG
+npm run test:websocket   # 小程序 WebSocket 协议
+npm run test:e2e         # Playwright 浏览器流程
+npm run load:auction     # Locust 只读接口压测
+npm run eval:agent       # 无模型 Key 的 Agent 路由、RAG 和工具离线评测
+```
+
+Playwright 和 Locust 需要额外安装，完整命令见 [tests/README.md](tests/README.md)。
+
+面向 Python Agent/测试开发岗位的项目讲解、简历表述和面试演示路径见 [docs/python-agent-portfolio.md](docs/python-agent-portfolio.md)。
+
+Agent 内部观测接口：
+
+```text
+GET http://localhost:8100/v1/metrics
+GET http://localhost:8100/v1/evaluation
+```
+
+如果配置了 `AGENT_SERVICE_TOKEN`，请求需要携带 `X-Agent-Service-Token`。`/v1/metrics` 只返回聚合延迟、来源、兜底率和工具调用信息；`/v1/evaluation` 不调用远程模型，适合在 CI 或面试演示中重复运行。
+
+### Docker Compose
+
+项目提供了 Node、FastAPI、MySQL 和 Redis 的本地编排。默认使用 MySQL 持久化，Redis 为后续实时事件和缓存扩展预留：
+
+```bash
+docker compose up --build
+```
+
+访问 `http://localhost:4300/`，FastAPI 健康检查为 `http://localhost:8100/health`。默认演示凭据仅适用于本地环境，部署前请通过环境变量修改数据库密码、邀请码和 `AGENT_SERVICE_TOKEN`。
 
 ## 演示账号
 
@@ -188,6 +259,7 @@ MYSQL_USER=root
 MYSQL_PASSWORD=
 MYSQL_DATABASE=realtime_auction
 MYSQL_CONNECTION_LIMIT=10
+REDIS_URL=redis://127.0.0.1:6379/0
 
 HOST_INVITE_CODE=
 MAX_UPLOAD_BYTES=2097152
@@ -195,6 +267,10 @@ MAX_UPLOAD_BYTES=2097152
 AI_API_URL=
 AI_API_KEY=
 AI_MODEL=
+AGENT_BASE_URL=
+AGENT_SERVICE_TOKEN=
+AGENT_TIMEOUT_MS=8000
+AGENT_MODEL_TIMEOUT_SECONDS=8
 USTC_LLM_API_KEY=
 USTC_LLM_API_URL=https://api.llm.ustc.edu.cn/v1/chat/completions
 USTC_LLM_MODEL=deepseek-v4-flash-ascend
@@ -213,6 +289,7 @@ WECHAT_MINIPROGRAM_SECRET=
 - `AUCTION_DATA_FILE`：本地 JSON 状态文件路径。
 - `AUCTION_STORAGE`：设为 `mysql` 时启用 MySQL 持久化；默认使用 JSON。
 - `DATABASE_URL`：MySQL 连接字符串，优先级高于拆分的 `MYSQL_*` 配置。
+- `REDIS_URL`：Redis 地址，Compose 中已预留给后续实时事件和缓存能力。
 - `HOST_INVITE_CODE`：主播注册邀请码。未配置时不允许公开注册新主播，但内置演示主播可用。
 - `MAX_UPLOAD_BYTES`：商品导入文件大小上限，默认 2MB。
 - `USTC_LLM_API_KEY`：中科大 LLM 网关 API Key；配置后会默认调用 `https://api.llm.ustc.edu.cn/v1/chat/completions` 和 `deepseek-v4-flash-ascend`。
@@ -220,6 +297,11 @@ WECHAT_MINIPROGRAM_SECRET=
 - `DEEPSEEK_API_KEY`：DeepSeek API Key；配置后商品讲解词、主播话术、竞拍复盘和异常出价提示会优先调用 DeepSeek。
 - `DEEPSEEK_API_URL` / `DEEPSEEK_MODEL`：DeepSeek 接口地址和模型，默认分别为 `https://api.deepseek.com/chat/completions` 和 `deepseek-v4-flash`。
 - `AI_API_URL` / `AI_API_KEY` / `AI_MODEL`：通用 OpenAI 兼容模型配置；优先级最高。模型配置优先级为 `AI_*` > `USTC_LLM_*` > `DEEPSEEK_*`，未配置 key 时使用本地兜底。
+- `AGENT_BASE_URL`：可选 FastAPI Agent 地址，例如 `http://127.0.0.1:8100`。配置后 Node `/api/ai/*` 优先转发到 Agent。
+- `AGENT_SERVICE_TOKEN`：可选的 Node-Agent 内部鉴权 Token；Node 和 FastAPI 两端必须保持一致。
+- `AGENT_TIMEOUT_MS` / `AGENT_MODEL_TIMEOUT_SECONDS`：Node 转发和 Agent 模型调用超时时间。
+- `AGENT_MODEL_MAX_RETRIES` / `AGENT_MODEL_RETRY_BACKOFF_SECONDS`：模型对超时、限流和 5xx 等临时错误的重试次数与指数退避基准。
+- `AGENT_CIRCUIT_FAILURE_THRESHOLD` / `AGENT_CIRCUIT_RECOVERY_SECONDS`：连续临时错误触发熔断的阈值和恢复探测时间。
 - `WECHAT_MINIPROGRAM_APPID` / `WECHAT_MINIPROGRAM_SECRET`：预留给真实微信小程序登录。
 
 中科大 LLM 网关启动示例：
