@@ -9,8 +9,15 @@ hermetic (which mutation testing also depends on).
 """
 
 import pytest
+from hypothesis import settings
 
 from services.agent.app.memory import conversation_memory
+
+# Derandomize property tests so CI and mutation runs are reproducible: the same
+# inputs are explored every run, which keeps the suite from flaking while still
+# covering a wide space of examples.
+settings.register_profile("deterministic", derandomize=True, deadline=None)
+settings.load_profile("deterministic")
 
 
 @pytest.fixture(autouse=True)

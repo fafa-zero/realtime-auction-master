@@ -150,10 +150,13 @@ Python 侧质量门禁（本地或 CI 均可运行）：
 
 ```bash
 pip install -r services/agent/requirements-dev.txt
-python -m ruff check services/agent tests
-python -m mypy
-python -m pytest --cov=services.agent.app --cov-fail-under=85 services/agent/tests
+python -m ruff check services/agent tests   # 代码风格与静态检查
+python -m mypy                               # 类型检查
+python -m pytest --cov=services.agent.app --cov-fail-under=85 services/agent/tests  # 单元 + 属性测试 + 覆盖率门禁
+python -m mutmut run                         # 变异测试（核心逻辑变异得分约 96%）
 ```
+
+其中 `services/agent/tests/test_properties.py` 使用 Hypothesis 做属性测试，`pyproject.toml` 的 `[tool.mutmut]` 配置了对风险规则、检索、策略和熔断等核心模块的变异测试。
 
 测试入口位于 `tests/`：
 

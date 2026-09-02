@@ -2,3 +2,5 @@
 -r requirements-langgraph.txt
 ruff>=0.16,<0.17
 mypy>=1.11,<3
+hypothesis>=6.100,<7
+mutmut>=3,<4

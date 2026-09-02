@@ -16,8 +16,8 @@
 | RAG | 基于竞拍规则和 AI 合规规范的轻量词法检索，并返回 citations |
 | 记忆 | 按用户、直播间和 session 隔离的有界 TTL 会话记忆 |
 | Agent 安全 | Agent 只读 Node 传入上下文，按主播/买家角色隔离订单，不能出价、支付或修改订单 |
-| 测试开发 | pytest API/工具测试、mock httpx 覆盖模型重试/退避/熔断/脱敏全分支、离线评测集、WebSocket 契约、Playwright、Locust |
-| 质量门禁 | ruff + mypy 静态检查、pytest 分支覆盖率 ≥85% 门禁，全部纳入 GitHub Actions CI |
+| 测试开发 | pytest API/工具测试、mock httpx 覆盖模型重试/退避/熔断/脱敏全分支、Hypothesis 属性测试、离线评测集、WebSocket 契约、Playwright、Locust |
+| 质量门禁 | ruff + mypy 静态检查、pytest 分支覆盖率 ≥85% 门禁、mutmut 变异测试（核心逻辑变异得分约 96%），全部纳入 GitHub Actions CI |
 | 安全测试 | Prompt Injection、系统提示泄露、出价/支付越权请求均在模型调用前拦截 |
 | 服务契约 | Node -> FastAPI snake_case 请求、鉴权头、响应字段和追踪 ID 有独立契约测试 |
 | 工程交付 | Docker Compose、健康检查、GitHub Actions 多 Job CI |
@@ -40,6 +40,7 @@
 - 实现意图路由、可解释风险工具、固定工具计划、轻量 RAG 和用户级短期记忆；模型不可用时自动降级到确定性本地策略。
 - 实现由模型自主决策的动态工具调用循环，并分别用原生 `tool_calls` 和 LangGraph `StateGraph` 两种方式落地，在同一套只读工具、策略拦截、熔断与评测标准下对比“手写编排 vs 主流框架”的取舍。
 - 用 `httpx` mock 传输补齐模型调用路径测试，覆盖重试、指数退避、熔断、4xx/5xx 分类、空响应与 API Key 脱敏等分支；引入 ruff + mypy 静态检查与 ≥85% 分支覆盖率门禁，全部纳入 CI。
+- 用 Hypothesis 属性测试为风险规则、库存/订单聚合、检索、策略拦截和熔断建立不变量校验（过程中发现并修正了 `_number` 对 "inf"/"nan" 字符串的边界行为）；用 mutmut 变异测试度量断言强度，将核心逻辑变异得分从约 50% 提升到约 96%，并借此修复了一处依赖本地 Redis 的测试隔离缺陷。
 - 建立 pytest + WebSocket + Playwright + Locust 的分层测试体系，并加入无模型 Key 的离线评测门禁和 GitHub Actions CI。
 - 增加 Agent 延迟 histogram、模型/兜底来源、失败数、P95 和工具调用指标，并提供 Prometheus 抓取端点定位模型超时与回退问题。
 - 为模型临时故障加入有限重试、指数退避和熔断恢复；为 Node-FastAPI 协议加入独立契约测试。

@@ -38,7 +38,20 @@ def test_number_matches_float_for_finite_values(value: float) -> None:
     assert _number(value) == float(value)
 
 
-@given(st.one_of(st.none(), st.text(alphabet=string.ascii_letters, min_size=1), st.lists(st.integers())))
+def _is_unparseable(text: str) -> bool:
+    # "inf"/"nan"/"1e3" etc. are accepted by float(); exclude them so the
+    # strategy only yields genuinely non-numeric strings.
+    try:
+        float(text)
+    except (ValueError, OverflowError):
+        return True
+    return False
+
+
+unparseable_text = st.text(alphabet=string.ascii_letters, min_size=1).filter(_is_unparseable)
+
+
+@given(st.one_of(st.none(), unparseable_text, st.lists(st.integers())))
 def test_number_coerces_non_numeric_to_zero(value: object) -> None:
     result = _number(value)
     assert isinstance(result, float)
