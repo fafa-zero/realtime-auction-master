@@ -932,7 +932,10 @@ export function startAuction(liveRoomIdOrOptions: string | StartAuctionOptions =
 
   archiveCurrentAuction(liveRoomId);
 
-  const now = Date.now();
+  const latestOrderCreatedAt = orders
+    .filter((order) => order.auctionId === auction.id)
+    .reduce((latest, order) => Math.max(latest, order.createdAt), 0);
+  const now = Math.max(Date.now(), latestOrderCreatedAt + 1);
   removeAuctionBids(auction.id);
   removeProcessedRequestsForAuction(auction.id);
 
