@@ -1,8 +1,8 @@
 """Dependency-free circuit breaker for outbound model calls."""
 
+import time
 from dataclasses import dataclass
 from threading import Lock
-import time
 
 
 @dataclass(frozen=True)

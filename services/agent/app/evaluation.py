@@ -12,7 +12,6 @@ from .knowledge import retrieve
 from .orchestrator import detect_intent
 from .tools import run_tool_plan
 
-
 EVALUATION_CASES: tuple[dict[str, Any], ...] = (
     {
         "id": "rules-question",

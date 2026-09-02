@@ -4,11 +4,11 @@ from typing import Any
 from .agent import run_agent
 from .knowledge import KnowledgeHit, retrieve
 from .memory import conversation_memory, format_turns
-from .schemas import AgentRunRequest, ChatRequest, ChatResponse
+from .schemas import AgentRunRequest, AgentTask, ChatRequest, ChatResponse
 from .tools import run_tool_plan
 
 
-def detect_intent(message: str) -> str:
+def detect_intent(message: str) -> AgentTask:
     text = message.lower()
     if any(word in text for word in ("售后", "退款", "退货", "换货", "物流", "投诉")):
         return "after-sales"

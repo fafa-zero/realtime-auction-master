@@ -1,0 +1,4 @@
+-r requirements.txt
+-r requirements-langgraph.txt
+ruff>=0.16,<0.17
+mypy>=1.11,<3

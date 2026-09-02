@@ -2,7 +2,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-
 AgentTask = Literal[
     "product-script",
     "auction-summary",

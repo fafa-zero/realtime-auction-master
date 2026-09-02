@@ -2,7 +2,6 @@
 
 import re
 
-
 _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "instruction_override",

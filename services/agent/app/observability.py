@@ -1,9 +1,8 @@
 """Request-scoped tracing helpers for the Agent service."""
 
-from contextvars import ContextVar
 import logging
+from contextvars import ContextVar
 from uuid import uuid4
-
 
 request_id_var: ContextVar[str] = ContextVar("agent_request_id", default="-")
 logger = logging.getLogger("auction-agent")

@@ -5,11 +5,10 @@ aggregate request metadata; prompts, user identifiers and model credentials
 are never stored.
 """
 
+import time
 from collections import Counter, deque
 from threading import Lock
-import time
 from typing import Any
-
 
 _started_at = time.time()
 _lock = Lock()

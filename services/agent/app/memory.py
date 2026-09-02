@@ -1,15 +1,21 @@
-from collections import deque
-from dataclasses import dataclass
+from __future__ import annotations
+
+import contextlib
 import json
 import os
 import time
+from collections import deque
+from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any
 
 try:
     from redis.asyncio import Redis
-except ImportError:  # Redis is optional for local fallback mode.
-    Redis = Any  # type: ignore[misc,assignment]
+
+    _REDIS_AVAILABLE = True
+except ImportError:  # pragma: no cover - Redis is optional for local fallback mode.
+    Redis = None
+    _REDIS_AVAILABLE = False
 
 
 @dataclass(frozen=True)
@@ -67,8 +73,8 @@ class ConversationMemory:
         if remote is not None:
             try:
                 values = await remote.lrange(self._redis_key(key), 0, -1)
-                turns = [self._decode_turn(value) for value in values]
-                turns = [turn for turn in turns if turn is not None]
+                decoded = [self._decode_turn(value) for value in values]
+                turns = [turn for turn in decoded if turn is not None]
                 if turns:
                     self._replace_local(key, turns)
                     return turns
@@ -115,7 +121,7 @@ class ConversationMemory:
             return None
         if self._redis is not None:
             return self._redis
-        if Redis is Any:
+        if not _REDIS_AVAILABLE:
             self._redis_disabled_until = time.time() + 60
             return None
         try:
@@ -136,10 +142,8 @@ class ConversationMemory:
 
     async def _disable_redis(self, remote: Redis) -> None:
         self._redis_disabled_until = time.time() + 10
-        try:
+        with contextlib.suppress(Exception):
             await remote.aclose()
-        except Exception:
-            pass
         self._redis = None
 
     def _redis_key(self, key: str) -> str:
@@ -165,7 +169,7 @@ class ConversationMemory:
             created_at = payload.get("createdAt")
             if not isinstance(role, str) or not isinstance(content, str):
                 return None
-            return MemoryTurn(role=role, content=content, created_at=float(created_at))
+            return MemoryTurn(role=role, content=content, created_at=float(created_at or 0.0))
         except (TypeError, ValueError, json.JSONDecodeError):
             return None
 

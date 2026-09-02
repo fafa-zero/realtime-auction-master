@@ -4,7 +4,6 @@ import os
 import pytest
 import websockets
 
-
 WS_URL = os.getenv("AUCTION_WS_URL", "ws://127.0.0.1:4300/miniprogram-ws")
 
 
