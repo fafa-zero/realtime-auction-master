@@ -17,6 +17,7 @@ yarn-debug.log*
 apps/miniprogram/project.private.config.json
 mutants
 .hypothesis
+.run
 .mutmut-cache
 coverage-agent.xml
 .coverage

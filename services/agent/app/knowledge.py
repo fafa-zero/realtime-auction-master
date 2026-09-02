@@ -1,5 +1,13 @@
+import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
+
+import numpy as np
+
+from .embeddings import Embedder, get_embedder
+
+_TOKEN_RE = re.compile(r"[a-z0-9]+|[\u4e00-\u9fff]")
 
 
 @dataclass(frozen=True)
@@ -67,18 +75,96 @@ KNOWLEDGE_BASE = (
 )
 
 
-def retrieve(query: str, top_k: int = 3) -> list[KnowledgeHit]:
-    """Lightweight lexical retrieval without adding a vector database dependency."""
+def _lexical_scores(query: str) -> dict[str, float]:
     normalized = query.strip().lower()
-    tokens = set(re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]", normalized))
-    scored: list[KnowledgeHit] = []
+    tokens = set(_TOKEN_RE.findall(normalized))
+    scores: dict[str, float] = {}
     for document in KNOWLEDGE_BASE:
         keyword_hits = sum(1 for keyword in document.keywords if keyword.lower() in normalized)
         token_hits = sum(1 for token in tokens if token in document.content.lower())
         score = float(keyword_hits * 2 + token_hits)
         if score > 0:
-            scored.append(KnowledgeHit(document.id, document.title, document.content, score))
+            scores[document.id] = score
+    return scores
+
+
+def retrieve(query: str, top_k: int = 3) -> list[KnowledgeHit]:
+    """Lightweight lexical retrieval without adding a vector database dependency."""
+    scores = _lexical_scores(query)
+    scored = [
+        KnowledgeHit(document.id, document.title, document.content, scores[document.id])
+        for document in KNOWLEDGE_BASE
+        if document.id in scores
+    ]
     if not scored:
         general = KNOWLEDGE_BASE[0]
         scored.append(KnowledgeHit(general.id, general.title, general.content, 0.1))
     return sorted(scored, key=lambda item: item.score, reverse=True)[:top_k]
+
+
+def _document_text(document: KnowledgeDocument) -> str:
+    return f"{document.title} {document.content} {' '.join(document.keywords)}"
+
+
+_matrix_cache: dict[str, np.ndarray] = {}
+
+
+def _document_matrix(embedder: Embedder) -> np.ndarray:
+    cached = _matrix_cache.get(embedder.name)
+    if cached is None:
+        cached = embedder.embed([_document_text(document) for document in KNOWLEDGE_BASE])
+        _matrix_cache[embedder.name] = cached
+    return cached
+
+
+def retrieve_semantic(query: str, top_k: int = 3, embedder: Embedder | None = None) -> list[KnowledgeHit]:
+    """Embedding-based retrieval using cosine similarity over document vectors."""
+    embedder = embedder or get_embedder()
+    try:
+        doc_matrix = _document_matrix(embedder)
+        query_vector = embedder.embed([query])[0]
+    except Exception:  # embedding backend unavailable: never break retrieval
+        return retrieve(query, top_k)
+    similarities = doc_matrix @ query_vector
+    order = np.argsort(-similarities)[:top_k]
+    return [
+        KnowledgeHit(
+            KNOWLEDGE_BASE[i].id,
+            KNOWLEDGE_BASE[i].title,
+            KNOWLEDGE_BASE[i].content,
+            round(float(similarities[i]), 4),
+        )
+        for i in order
+    ]
+
+
+def retrieve_hybrid(
+    query: str, top_k: int = 3, alpha: float = 0.5, embedder: Embedder | None = None
+) -> list[KnowledgeHit]:
+    """Blend normalized lexical overlap with embedding cosine similarity."""
+    embedder = embedder or get_embedder()
+    lexical = _lexical_scores(query)
+    max_lexical = max(lexical.values()) if lexical else 0.0
+    try:
+        doc_matrix = _document_matrix(embedder)
+        query_vector = embedder.embed([query])[0]
+    except Exception:  # embedding backend unavailable: fall back to lexical
+        return retrieve(query, top_k)
+    similarities = doc_matrix @ query_vector
+    blended: list[KnowledgeHit] = []
+    for i, document in enumerate(KNOWLEDGE_BASE):
+        lexical_norm = (lexical.get(document.id, 0.0) / max_lexical) if max_lexical > 0 else 0.0
+        semantic = max(0.0, float(similarities[i]))
+        score = round(alpha * semantic + (1 - alpha) * lexical_norm, 4)
+        blended.append(KnowledgeHit(document.id, document.title, document.content, score))
+    return sorted(blended, key=lambda item: item.score, reverse=True)[:top_k]
+
+
+def select_retriever() -> Callable[[str], list[KnowledgeHit]]:
+    """Pick the retrieval strategy from ``AGENT_RETRIEVAL`` (hybrid|semantic|lexical)."""
+    mode = os.getenv("AGENT_RETRIEVAL", "hybrid").strip().lower()
+    if mode == "lexical":
+        return retrieve
+    if mode == "semantic":
+        return retrieve_semantic
+    return retrieve_hybrid

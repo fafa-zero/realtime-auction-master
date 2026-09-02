@@ -2,7 +2,7 @@ import json
 from typing import Any
 
 from .agent import run_agent
-from .knowledge import KnowledgeHit, retrieve
+from .knowledge import KnowledgeHit, select_retriever
 from .memory import conversation_memory, format_turns
 from .schemas import AgentRunRequest, AgentTask, ChatRequest, ChatResponse
 from .tools import run_tool_plan
@@ -84,7 +84,7 @@ async def run_chat(request: ChatRequest) -> ChatResponse:
     room_key = request.live_room_id or "global"
     key = f"{request.user_id}:{room_key}:{request.session_id}"
     previous_turns = await conversation_memory.aget(key)
-    hits = retrieve(request.message)
+    hits = select_retriever()(request.message)
     tool_results, tools_used = run_tool_plan(intent, request.context)
     knowledge_text = "\n".join(f"[{hit.title}] {hit.content}" for hit in hits)
     history_text = format_turns(previous_turns)
