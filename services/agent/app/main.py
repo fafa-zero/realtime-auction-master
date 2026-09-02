@@ -4,6 +4,7 @@ import os
 import time
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from fastapi.responses import StreamingResponse
 
 from .agent import model_circuit_breaker, run_agent
 from .config import load_local_env
@@ -16,6 +17,7 @@ from .observability import logger, new_request_id, request_id_var
 from .orchestrator import run_chat
 from .prometheus import render_metrics
 from .schemas import AgentRunRequest, AiResult, ChatRequest, ChatResponse
+from .stream_agent import run_stream_agent_sse
 from .tools import list_tools
 
 load_local_env()
@@ -122,6 +124,16 @@ async def run_dynamic(request: AgentRunRequest) -> AiResult:
 async def run_graph(request: AgentRunRequest) -> AiResult:
     """Run the LangGraph variant of the dynamic tool-calling loop."""
     return await run_graph_agent(request)
+
+
+@app.post("/v1/agent/stream", dependencies=[Depends(require_service_auth)])
+async def run_stream(request: AgentRunRequest) -> StreamingResponse:
+    """Stream the dynamic tool-calling agent as Server-Sent Events."""
+    return StreamingResponse(
+        run_stream_agent_sse(request),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 async def _run_task(request: AgentRunRequest, task: str) -> AiResult:
