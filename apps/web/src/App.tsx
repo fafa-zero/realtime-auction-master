@@ -48,6 +48,7 @@ import type {
 const API_URL = resolveApiUrl(import.meta.env.VITE_API_URL);
 const DEFAULT_LIVE_ROOM_ID = "live-1";
 const SESSION_STORAGE_KEY = "auction_web_session";
+const ACK_TIMEOUT_MS = 8000;
 const demoWebAccounts = {
   HOST: { account: "demo-host", password: "demo123" },
   BUYER: { account: "demo-buyer", password: "demo123" }
@@ -587,6 +588,15 @@ export function App() {
       startPolling();
       setMessage(error.message || "实时连接鉴权失败，请重新登录");
     });
+    socket.io.on("reconnect_failed", () => {
+      if (cancelled) {
+        return;
+      }
+      realtimeConnected = false;
+      setConnected(false);
+      startPolling();
+      setMessage("多次重连失败，请刷新页面后重试");
+    });
 
     function syncSnapshotClock(data: AuctionSnapshot) {
       setServerOffset(data.serverTime - Date.now());
@@ -598,7 +608,7 @@ export function App() {
       stopPolling();
       socket.disconnect();
     };
-  }, [liveRoomId, route.home, route.notFound, session?.token, viewMode]);
+  }, [liveRoomId, route.home, route.notFound, route.setup, session?.token, viewMode]);
 
   useEffect(() => {
     fetch(`${API_URL}/api/live-rooms`)
@@ -808,11 +818,8 @@ export function App() {
   }
 
   function goBack() {
-    setSession(null);
-    writeStoredSession(null);
-    setAuthMode("login");
-    setAuthMessage("已返回登录入口，可重新登录或注册账号");
-    setMessage("已返回登录入口");
+    navigateTo("/", setRoute);
+    setMessage("已返回首页");
   }
 
   function renderFloatingBackButton() {
@@ -823,7 +830,7 @@ export function App() {
     return (
       <button className="floating-back-button" onClick={goBack}>
         <ArrowLeft size={18} />
-        返回登录/注册
+        返回首页
       </button>
     );
   }
@@ -933,6 +940,16 @@ export function App() {
       return;
     }
 
+    let settled = false;
+    const timeoutId = window.setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      input.onDone?.();
+      setMessage("出价超时，请检查网络后重试");
+    }, ACK_TIMEOUT_MS);
+
     socketRef.current.emit(
       "auction:bid",
       {
@@ -943,6 +960,11 @@ export function App() {
         clientRequestId: `${input.userId}-${Date.now()}-${Math.random().toString(16).slice(2)}`
       },
       (response: { ok: boolean; message?: string; risk?: BidRisk }) => {
+        window.clearTimeout(timeoutId);
+        if (settled) {
+          return;
+        }
+        settled = true;
         input.onDone?.();
 
         if (!response.ok) {
@@ -985,6 +1007,16 @@ export function App() {
       fallbackNickname: nickname,
       viewMode
     });
+    let settled = false;
+    const timeoutId = window.setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      setSendingDanmaku(false);
+      setMessage("弹幕发送超时，请检查网络后重试");
+    }, ACK_TIMEOUT_MS);
+
     socketRef.current.emit(
       "danmaku:send",
       {
@@ -994,6 +1026,11 @@ export function App() {
         content
       },
       (response: { ok: boolean; message?: DanmakuMessage | string }) => {
+        window.clearTimeout(timeoutId);
+        if (settled) {
+          return;
+        }
+        settled = true;
         setSendingDanmaku(false);
 
         if (!response.ok) {

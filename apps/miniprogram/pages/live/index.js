@@ -169,7 +169,7 @@ Page({
       return;
     }
 
-    this.setData({ error: "" });
+    this.setData({ loading: true, error: "" });
 
     try {
       const [roomData, snapshot] = await Promise.all([
@@ -423,6 +423,12 @@ Page({
       this.realtimeConnected = false;
       this.realtimeSocket = null;
 
+      try {
+        socket.close({ code: 1000, reason: "fallback" });
+      } catch (closeError) {
+        // 忽略已关闭连接的重复 close
+      }
+
       if (index < baseUrls.length - 1) {
         this.connectRealtimeCandidate(baseUrls, index + 1, attemptId);
         return;
@@ -532,6 +538,18 @@ Page({
       if (this.applySnapshot(payload)) {
         this.setData({ debugText: `实时同步 ${time(Date.now())}` });
       }
+      return;
+    }
+
+    if (event.type === "auction:cancelled") {
+      if (payload && payload.snapshot) {
+        this.applySnapshot(payload.snapshot);
+      } else {
+        this.loadSnapshot();
+      }
+
+      this.showHint(payload && payload.reason ? `竞拍已取消：${payload.reason}` : "竞拍已取消");
+      this.setData({ debugText: `竞拍已取消 ${time(Date.now())}` });
       return;
     }
 
