@@ -7,15 +7,16 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 try:
     from redis.asyncio import Redis
 
     _REDIS_AVAILABLE = True
 except ImportError:  # pragma: no cover - Redis is optional for local fallback mode.
-    Redis = None
     _REDIS_AVAILABLE = False
+    if not TYPE_CHECKING:
+        Redis = None
 
 
 @dataclass(frozen=True)
@@ -45,7 +46,9 @@ class ConversationMemory:
         self.redis_prefix = redis_prefix
         self._items: dict[str, deque[MemoryTurn]] = {}
         self._updated_at: dict[str, float] = {}
-        self._redis: Redis | None = None
+        # redis-py types async commands as ``Awaitable[T] | T``, which does not
+        # play well with ``await``; treat the client as dynamic to avoid that.
+        self._redis: Any = None
         self._redis_disabled_until = 0.0
 
     def get(self, key: str) -> list[MemoryTurn]:
@@ -116,7 +119,7 @@ class ConversationMemory:
             await self._redis.aclose()
             self._redis = None
 
-    async def _redis_client(self) -> Redis | None:
+    async def _redis_client(self) -> Any:
         if not self.redis_url or time.time() < self._redis_disabled_until:
             return None
         if self._redis is not None:
@@ -140,7 +143,7 @@ class ConversationMemory:
             self._redis_disabled_until = time.time() + 10
             return None
 
-    async def _disable_redis(self, remote: Redis) -> None:
+    async def _disable_redis(self, remote: Any) -> None:
         self._redis_disabled_until = time.time() + 10
         with contextlib.suppress(Exception):
             await remote.aclose()
