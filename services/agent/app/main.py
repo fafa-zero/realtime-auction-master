@@ -7,14 +7,16 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Response
 
 from .agent import model_circuit_breaker, run_agent
 from .config import load_local_env
+from .dynamic_agent import run_dynamic_agent
 from .evaluation import run_evaluation
-from .metrics import prometheus_snapshot, snapshot as metrics_snapshot
-from .observability import new_request_id, logger, request_id_var
+from .graph_agent import run_graph_agent
+from .metrics import prometheus_snapshot
+from .metrics import snapshot as metrics_snapshot
+from .observability import logger, new_request_id, request_id_var
 from .orchestrator import run_chat
 from .prometheus import render_metrics
 from .schemas import AgentRunRequest, AiResult, ChatRequest, ChatResponse
 from .tools import list_tools
-
 
 load_local_env()
 
@@ -108,6 +110,18 @@ async def evaluation() -> dict[str, object]:
 @app.post("/v1/agent/run", response_model=AiResult, dependencies=[Depends(require_service_auth)])
 async def run(request: AgentRunRequest) -> AiResult:
     return await run_agent(request)
+
+
+@app.post("/v1/agent/dynamic", response_model=AiResult, dependencies=[Depends(require_service_auth)])
+async def run_dynamic(request: AgentRunRequest) -> AiResult:
+    """Run the native dynamic tool-calling loop (model chooses tools)."""
+    return await run_dynamic_agent(request)
+
+
+@app.post("/v1/agent/graph", response_model=AiResult, dependencies=[Depends(require_service_auth)])
+async def run_graph(request: AgentRunRequest) -> AiResult:
+    """Run the LangGraph variant of the dynamic tool-calling loop."""
+    return await run_graph_agent(request)
 
 
 async def _run_task(request: AgentRunRequest, task: str) -> AiResult:

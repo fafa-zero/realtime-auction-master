@@ -4,9 +4,9 @@ Tools intentionally consume a request-scoped context supplied by Node. They do
 not read the Node JSON store directly, so there is one owner for auction state.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
-
+from typing import Any
 
 ToolHandler = Callable[[dict[str, Any]], dict[str, Any]]
 
@@ -274,6 +274,47 @@ TASK_PLANS: dict[str, list[str]] = {
 
 def list_tools() -> list[dict[str, str]]:
     return [{"name": tool.name, "description": tool.description} for tool in TOOLS.values()]
+
+
+def openai_tool_schemas() -> list[dict[str, Any]]:
+    """Expose the registry as OpenAI-compatible function schemas.
+
+    Every tool reads only from the server-supplied, read-only context, so the
+    model just picks which tool to run. An optional ``focus`` hint is accepted
+    for the model's convenience but never used to fetch or mutate anything the
+    caller was not already authorized to see.
+    """
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "focus": {
+                            "type": "string",
+                            "description": "可选关注点，仅作说明，不影响只读数据的获取范围",
+                        }
+                    },
+                    "required": [],
+                },
+            },
+        }
+        for tool in TOOLS.values()
+    ]
+
+
+def run_single_tool(name: str, context: dict[str, Any]) -> dict[str, Any]:
+    """Execute one registered tool by name against the read-only context."""
+    tool = TOOLS.get(name)
+    if tool is None:
+        return {"ok": False, "error": f"unknown tool: {name}"}
+    try:
+        return tool.handler(context)
+    except Exception as exc:  # Tools are advisory; a failure must not break the loop.
+        return {"ok": False, "error": str(exc)}
 
 
 def run_tool_plan(task: str, context: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:

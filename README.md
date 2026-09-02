@@ -131,6 +131,30 @@ POST /api/agent/chat
 GET  http://127.0.0.1:8100/v1/tools
 ```
 
+#### 动态工具调用（两种实现，可对比）
+
+除了确定性的固定工具计划，Agent 还提供两条“由模型自主决定调用哪些工具”的动态路径，二者共用同一套只读工具、策略拦截、熔断和本地兜底：
+
+```text
+POST http://127.0.0.1:8100/v1/agent/dynamic   # 原生手写 tool_calls 循环，无框架依赖
+POST http://127.0.0.1:8100/v1/agent/graph      # LangGraph StateGraph 实现（可选依赖）
+```
+
+两条路径在无模型 Key、命中越权策略或触发熔断时都会自动降级到确定性本地兜底。LangGraph 变体属于可选依赖，未安装时 `/v1/agent/graph` 直接返回本地兜底：
+
+```bash
+pip install -r services/agent/requirements-langgraph.txt
+```
+
+Python 侧质量门禁（本地或 CI 均可运行）：
+
+```bash
+pip install -r services/agent/requirements-dev.txt
+python -m ruff check services/agent tests
+python -m mypy
+python -m pytest --cov=services.agent.app --cov-fail-under=85 services/agent/tests
+```
+
 测试入口位于 `tests/`：
 
 ```bash
@@ -307,6 +331,7 @@ WECHAT_MINIPROGRAM_SECRET=
 - `AGENT_BASE_URL`：可选 FastAPI Agent 地址，例如 `http://127.0.0.1:8100`。配置后 Node `/api/ai/*` 优先转发到 Agent。
 - `AGENT_SERVICE_TOKEN`：可选的 Node-Agent 内部鉴权 Token；Node 和 FastAPI 两端必须保持一致。
 - `AGENT_TIMEOUT_MS` / `AGENT_MODEL_TIMEOUT_SECONDS`：Node 转发和 Agent 模型调用超时时间。
+- `AGENT_MAX_TOOL_STEPS`：动态工具调用（`/v1/agent/dynamic` 与 `/v1/agent/graph`）的最大推理步数上限，防止工具调用循环发散，默认 4。
 - `AGENT_MODEL_MAX_RETRIES` / `AGENT_MODEL_RETRY_BACKOFF_SECONDS`：模型对超时、限流和 5xx 等临时错误的重试次数与指数退避基准。
 - `AGENT_CIRCUIT_FAILURE_THRESHOLD` / `AGENT_CIRCUIT_RECOVERY_SECONDS`：连续临时错误触发熔断的阈值和恢复探测时间。
 - `WECHAT_MINIPROGRAM_APPID` / `WECHAT_MINIPROGRAM_SECRET`：预留给真实微信小程序登录。
