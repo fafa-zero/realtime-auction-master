@@ -58,6 +58,13 @@ import {
 import type { ProductImportRow } from "./store.js";
 import { parseSpreadsheet, type SpreadsheetRecord } from "./spreadsheet.js";
 import { resolveMiniprogramLogin } from "./wechat.js";
+import { completeWithAgentChat } from "./ai.js";
+import {
+  closeRedisInfrastructure,
+  getAuctionSnapshotForRead,
+  initializeRedisInfrastructure,
+  publishRealtimeEvent
+} from "./redis-infrastructure.js";
 
 const PORT = Number(process.env.PORT ?? 4200);
 const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5174";
@@ -290,7 +297,7 @@ app.post("/api/auth/miniprogram/login", async (req, res) => {
     const input = schema.parse(req.body ?? {});
     const login = await resolveMiniprogramLogin(input);
     const result = loginMiniprogram({ ...input, openId: login.openId });
-    res.json({ ok: true, ...result });
+    res.json(result);
   } catch (error) {
     res.status(401).json({ ok: false, message: getErrorMessage(error) });
   }
@@ -444,8 +451,8 @@ app.get("/api/me/orders", (req, res) => {
   }
 });
 
-app.get("/api/auction", (_req, res) => {
-  res.json(getSnapshot());
+app.get("/api/auction", async (_req, res) => {
+  res.json(await getAuctionSnapshotForRead(DEFAULT_LIVE_ROOM_ID, () => getSnapshot()));
 });
 
 app.get("/api/live-rooms", (_req, res) => {
@@ -528,10 +535,12 @@ app.post("/api/live-rooms/:liveRoomId/view", (req, res) => {
   }
 });
 
-app.get("/api/live-rooms/:liveRoomId/auction", (req, res) => {
+app.get("/api/live-rooms/:liveRoomId/auction", async (req, res) => {
   try {
     assertLiveRoom(req.params.liveRoomId);
-    res.json(getSnapshot(req.params.liveRoomId));
+    res.json(
+      await getAuctionSnapshotForRead(req.params.liveRoomId, () => getSnapshot(req.params.liveRoomId))
+    );
   } catch (error) {
     res.status(404).json({ ok: false, message: getErrorMessage(error) });
   }
@@ -1059,6 +1068,143 @@ app.post("/api/ai/bid-risk", async (req, res) => {
   }
 });
 
+app.post("/api/agent/chat", async (req, res) => {
+  try {
+    const schema = z.object({
+      liveRoomId: z.string().min(1).optional(),
+      sessionId: z.string().regex(/^[A-Za-z0-9:_-]{1,80}$/, "会话 ID 格式不正确").optional(),
+      message: z.string().min(1, "消息不能为空").max(1_000, "消息不能超过 1000 个字符")
+    });
+    const input = schema.parse(req.body ?? {});
+    const user = getUserByToken(getAuthToken(req));
+    const liveRoomId = input.liveRoomId ?? DEFAULT_LIVE_ROOM_ID;
+    const liveRoom = getLiveRoom(liveRoomId);
+    const snapshot = getSnapshot(liveRoomId);
+    const sessionId = input.sessionId ?? "default";
+    const canAccessRoomOperations = user.role !== "BUYER";
+
+    if (canAccessRoomOperations) {
+      requireRoomHostUser(req, liveRoomId);
+    }
+
+    const inventory = canAccessRoomOperations ? getProductQueue(liveRoomId) : [];
+    const roomOrders = canAccessRoomOperations
+      ? getOrders(liveRoomId)
+      : getOrdersForUser(user.id, liveRoomId);
+    const historyItems = getAuctionHistory(liveRoomId).slice(0, 10);
+    const productNames = new Map([
+      ...inventory.map((item) => [item.product.id, item.product.name] as const),
+      ...historyItems.map((item) => [item.product.id, item.product.name] as const),
+      [snapshot.product.id, snapshot.product.name] as const
+    ]);
+    const history = historyItems.map((item) => ({
+      status: item.auction.status,
+      currentPrice: item.auction.currentPrice,
+      participantCount: item.participantCount,
+      bidCount: item.bids.length,
+      productName: item.product.name,
+      finalPrice: item.order?.finalPrice,
+      orderStatus: item.order?.status,
+      archivedAt: item.archivedAt
+    }));
+    const latestBid = snapshot.bids[0];
+    const latestBidRecentCount = latestBid
+      ? snapshot.bids.filter(
+          (bid) => bid.userId === latestBid.userId && snapshot.serverTime - bid.createdAt <= 30_000
+        ).length
+      : 0;
+    const context = {
+      liveRoom: {
+        id: liveRoom.id,
+        title: liveRoom.title,
+        hostName: liveRoom.hostName,
+        viewerCount: liveRoom.viewerCount
+      },
+      product: {
+        id: snapshot.product.id,
+        name: snapshot.product.name,
+        description: snapshot.product.description,
+        startPrice: snapshot.auction.startPrice,
+        incrementStep: snapshot.auction.incrementStep,
+        ceilingPrice: snapshot.auction.ceilingPrice,
+        durationSeconds: snapshot.auction.durationSeconds,
+        stock: snapshot.product.stock,
+        sellingPoints: snapshot.product.sellingPoints,
+        scriptKeywords: snapshot.product.scriptKeywords
+      },
+      auction: {
+        status: snapshot.auction.status,
+        currentPrice: snapshot.auction.currentPrice,
+        startPrice: snapshot.auction.startPrice,
+        incrementStep: snapshot.auction.incrementStep,
+        ceilingPrice: snapshot.auction.ceilingPrice,
+        durationSeconds: snapshot.auction.durationSeconds,
+        startTime: snapshot.auction.startTime,
+        endTime: snapshot.auction.endTime,
+        extendCount: snapshot.auction.extendCount
+      },
+      order: snapshot.order
+        ? { status: snapshot.order.status, finalPrice: snapshot.order.finalPrice }
+        : null,
+      bids: snapshot.bids.slice(0, 30).map((bid) => ({
+        nickname: bid.nickname,
+        price: bid.price,
+        createdAt: bid.createdAt
+      })),
+      participantCount: snapshot.participantCount,
+      recentDanmaku: getDanmakuMessages(liveRoomId).slice(0, 10).map((item) => `${item.nickname}：${item.content}`),
+      history,
+      inventory: inventory.map((item) => ({
+        id: item.product.id,
+        name: item.product.name,
+        stock: item.product.stock ?? 0,
+        queueStatus: item.product.queueStatus ?? "QUEUED",
+        auctionStatus: item.auction.status
+      })),
+      orders: roomOrders
+        .slice()
+        .sort((left, right) => right.createdAt - left.createdAt)
+        .slice(0, 30)
+        .map((order) => ({
+          id: order.id,
+          productId: order.productId,
+          productName: productNames.get(order.productId) ?? "竞拍商品",
+          buyerNickname: order.buyerNickname,
+          finalPrice: order.finalPrice,
+          status: order.status,
+          createdAt: order.createdAt
+        })),
+      bidRisk: latestBid
+        ? {
+            userId: latestBid.userId,
+            price: latestBid.price,
+            currentPrice: snapshot.bids[1]?.price ?? snapshot.auction.startPrice,
+            incrementStep: snapshot.auction.incrementStep,
+            recentBidCount: latestBidRecentCount,
+            reachesCeiling: latestBid.price >= snapshot.auction.ceilingPrice
+          }
+        : undefined,
+      serverTime: snapshot.serverTime
+    };
+    const result = await completeWithAgentChat({
+      message: input.message,
+      sessionId,
+      userId: user.id,
+      userRole: user.role,
+      liveRoomId,
+      context,
+      requestId: req.header("x-request-id")
+    });
+    writeAuditLog(user, "AGENT_CHAT", {
+      liveRoomId,
+      detail: { sessionId, intent: result.intent, toolsUsed: result.toolsUsed ?? [] }
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(getErrorStatus(error)).json({ ok: false, message: getErrorMessage(error) });
+  }
+});
+
 io.use((socket, next) => {
   try {
     const token = getSocketAuthToken(socket);
@@ -1303,10 +1449,21 @@ miniprogramWss.on("connection", (ws) => {
 });
 
 await initializePersistence();
+await initializeRedisInfrastructure((event) => {
+  emitLocalRealtimeEvent(event.liveRoomId, event.type, event.payload);
+});
 
 server.listen(PORT, () => {
   console.log(`Auction server is running on http://localhost:${PORT}`);
 });
+
+for (const signal of ["SIGTERM", "SIGINT"] as const) {
+  process.once(signal, () => {
+    void closeRedisInfrastructure().finally(() => {
+      server.close();
+    });
+  });
+}
 
 function getErrorMessage(error: unknown) {
   if (error instanceof z.ZodError) {
@@ -1360,6 +1517,11 @@ function getLiveRoomSocketRoom(liveRoomId: string) {
 }
 
 function broadcastAuctionEvent(liveRoomId: string, type: string, payload: unknown) {
+  emitLocalRealtimeEvent(liveRoomId, type, payload);
+  void publishRealtimeEvent(liveRoomId, type, payload);
+}
+
+function emitLocalRealtimeEvent(liveRoomId: string, type: string, payload: unknown) {
   io.to(getLiveRoomSocketRoom(liveRoomId)).emit(type, payload);
 
   for (const [ws, client] of miniprogramClients.entries()) {

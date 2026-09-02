@@ -25,6 +25,8 @@ env PORT=4300 CLIENT_URL=http://localhost:4300 npm --workspace apps/server run d
 ```text
 http://localhost:4300
 http://127.0.0.1:4300
+http://localhost:4200
+http://127.0.0.1:4200
 ```
 
 Web 页面和小程序必须连到同一个 `4300` 后端实例，才能共享同一套拍卖状态。Web 页面可以继续打开 `http://localhost:4300/host?liveRoomId=live-1`，小程序会自动使用能访问到该服务的本地地址。
@@ -41,7 +43,8 @@ Web 页面和小程序必须连到同一个 `4300` 后端实例，才能共享�
 - 小程序买家登录和注册复用 Web 账号体系，统一调用 `/api/auth/web/register` 和 `/api/auth/web/login`。
 - 首页区分买家注册和买家登录；注册需要账号、密码和买家昵称，登录需要账号和密码。
 - 详情页优先连接 `/miniprogram-ws` 实时接收竞拍快照、出价、成交、支付和弹幕事件。
-- REST 轮询与 HTTP 出价/弹幕接口保留为兜底，避免微信开发者工具 WebSocket timeout 阻断演示。
+- WebSocket 正常时每 8 秒用 REST 快照校准；断线时每 1.5 秒轮询、每 3 秒尝试重连，避免微信开发者工具 WebSocket timeout 阻断演示。
+- Redis 由 Node 服务连接，用于跨实例事件桥和短期快照缓存；小程序不直接连接或暴露 Redis。
 
 ## 生产边界
 

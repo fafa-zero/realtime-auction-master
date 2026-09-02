@@ -1,5 +1,10 @@
 node_modules
 dist
+__pycache__
+*.py[cod]
+.venv
+playwright-report
+test-results
 data
 output
 .gitdata-local
@@ -10,3 +15,11 @@ pnpm-debug.log*
 yarn-debug.log*
 .DS_Store
 apps/miniprogram/project.private.config.json
+mutants
+.hypothesis
+.run
+.mutmut-cache
+coverage-agent.xml
+.coverage
+.ruff_cache
+.mypy_cache

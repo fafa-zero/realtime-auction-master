@@ -15,6 +15,8 @@ const {
 const { money, remaining, time } = require("../../utils/format");
 
 const POLLING_INTERVAL_MS = 1500;
+const CONNECTED_POLLING_INTERVAL_MS = 8000;
+const REALTIME_RECONNECT_DELAY_MS = 3000;
 const LOCAL_PRODUCT_IMAGES = {
   "/static/jewelry.jpg": "/assets/jewelry.jpg",
   "/static/products/shuilanlan.jpg": "/assets/products/shuilanlan.jpg",
@@ -95,6 +97,7 @@ Page({
     serverOffset: 0,
     remainingText: "00:00",
     currentPriceText: "¥0",
+    nextBidText: "¥0",
     incrementText: "¥0",
     ceilingText: "¥0",
     stockText: "库存 1 件",
@@ -112,6 +115,7 @@ Page({
     progressText: "0%",
     ruleText: "起拍价 ¥0 / 最低加价 ¥0 / 封顶价 ¥0",
     realtimeText: "实时连接准备中",
+    lastSyncText: "--:--:--",
     debugText: "",
     canBid: false,
     danmakuText: "",
@@ -131,14 +135,15 @@ Page({
   },
 
   onShow() {
+    this.pageActive = true;
     this.ensurePageLogin()
       .then(() => {
         clearInterval(this.clockTimer);
-        clearInterval(this.pollingTimer);
+        clearTimeout(this.pollingTimer);
         this.load();
         this.connectRealtime();
         this.clockTimer = setInterval(() => this.refreshComputed(), 500);
-        this.pollingTimer = setInterval(() => this.loadSnapshot(), POLLING_INTERVAL_MS);
+        this.schedulePolling();
       })
       .catch(() => {
         this.closeRealtime();
@@ -146,15 +151,17 @@ Page({
   },
 
   onHide() {
+    this.pageActive = false;
     this.closeRealtime();
     clearInterval(this.clockTimer);
-    clearInterval(this.pollingTimer);
+    clearTimeout(this.pollingTimer);
   },
 
   onUnload() {
+    this.pageActive = false;
     this.closeRealtime();
     clearInterval(this.clockTimer);
-    clearInterval(this.pollingTimer);
+    clearTimeout(this.pollingTimer);
   },
 
   async load() {
@@ -162,7 +169,7 @@ Page({
       return;
     }
 
-    this.setData({ error: "" });
+    this.setData({ loading: true, error: "" });
 
     try {
       const [roomData, snapshot] = await Promise.all([
@@ -204,7 +211,7 @@ Page({
     } catch (error) {
       this.closeRealtime();
       clearInterval(this.clockTimer);
-      clearInterval(this.pollingTimer);
+      clearTimeout(this.pollingTimer);
       this.setData({
         authorized: false,
         checkingLogin: false,
@@ -225,7 +232,7 @@ Page({
     getApp().logout();
     this.closeRealtime();
     clearInterval(this.clockTimer);
-    clearInterval(this.pollingTimer);
+    clearTimeout(this.pollingTimer);
     this.setData({
       authorized: false,
       checkingLogin: false,
@@ -235,8 +242,8 @@ Page({
     wx.redirectTo({ url: "/pages/index/index" });
   },
 
-  async loadSnapshot() {
-    if (!this.data.authorized || this.data.loading || this.snapshotLoading) {
+  async loadSnapshot(force = false) {
+    if (!this.data.authorized || this.data.loading || this.snapshotLoading || (this.realtimeConnected && !force)) {
       return;
     }
 
@@ -245,11 +252,20 @@ Page({
     try {
       const snapshot = await getAuctionSnapshot(this.data.liveRoomId);
       this.applySnapshot(snapshot);
-      this.loadDanmakuHistory();
-      this.setData({
-        realtimeText: `轮询同步中：${getApiBaseUrl()}`,
-        debugText: `最近同步成功 ${time(Date.now())}`
-      });
+      if (!this.realtimeConnected) {
+        this.loadDanmakuHistory();
+      }
+      if (!this.realtimeConnected) {
+        this.setData({
+          realtimeText: `轮询同步中：${getApiBaseUrl()}`,
+          debugText: `最近同步成功 ${time(Date.now())}`
+        });
+      } else if (force) {
+        this.setData({
+          realtimeText: `WebSocket 实时同步中：${getApiBaseUrl()}`,
+          debugText: `HTTP 快照校准成功 ${time(Date.now())}`
+        });
+      }
     } catch (error) {
       this.setData({
         hint: error.message || "网络波动，正在恢复专场数据",
@@ -321,17 +337,48 @@ Page({
   },
 
   usePollingRealtime() {
-    this.setData({ realtimeText: `轮询同步中：${getApiBaseUrl()}` });
+    if (!this.realtimeConnected) {
+      this.setData({ realtimeText: `轮询同步中：${getApiBaseUrl()}` });
+    }
     this.loadSnapshot();
+    this.schedulePolling();
   },
 
   refreshNow() {
-    this.usePollingRealtime();
+    this.setData({ realtimeText: `正在刷新专场：${getApiBaseUrl()}` });
+    this.loadSnapshot(true);
+  },
+
+  schedulePolling() {
+    clearTimeout(this.pollingTimer);
+    const interval = this.realtimeConnected ? CONNECTED_POLLING_INTERVAL_MS : POLLING_INTERVAL_MS;
+    this.pollingTimer = setTimeout(async () => {
+      await this.loadSnapshot(!this.realtimeConnected || Boolean(this.lastRealtimeAt));
+      this.schedulePolling();
+    }, interval);
+  },
+
+  scheduleReconnect() {
+    if (!this.pageActive || this.realtimeConnected || this.reconnectTimer) {
+      return;
+    }
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.pageActive && !this.realtimeConnected) {
+        this.connectRealtime();
+      }
+    }, REALTIME_RECONNECT_DELAY_MS);
   },
 
   closeRealtime() {
     this.snapshotLoading = false;
     this.realtimeConnected = false;
+    clearTimeout(this.pollingTimer);
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
 
     if (this.realtimeSocket) {
       this.realtimeSocket.close();
@@ -376,6 +423,12 @@ Page({
       this.realtimeConnected = false;
       this.realtimeSocket = null;
 
+      try {
+        socket.close({ code: 1000, reason: "fallback" });
+      } catch (closeError) {
+        // 忽略已关闭连接的重复 close
+      }
+
       if (index < baseUrls.length - 1) {
         this.connectRealtimeCandidate(baseUrls, index + 1, attemptId);
         return;
@@ -386,6 +439,7 @@ Page({
         debugText: message || "WebSocket 连接失败，已切换轮询"
       });
       this.usePollingRealtime();
+      this.scheduleReconnect();
     };
 
     socket.onOpen(() => {
@@ -395,12 +449,14 @@ Page({
 
       opened = true;
       this.realtimeConnected = true;
+      this.lastRealtimeAt = Date.now();
       setApiBaseUrl(baseUrl);
       this.setData({
         realtimeText: `WebSocket 实时同步中：${baseUrl}`,
         debugText: `实时通道已连接 ${time(Date.now())}`
       });
       this.sendRealtimeMessage("auction:join", { liveRoomId: this.data.liveRoomId });
+      this.schedulePolling();
     });
 
     socket.onMessage((event) => {
@@ -426,6 +482,8 @@ Page({
         realtimeText: `实时通道异常，轮询同步中：${getApiBaseUrl()}`,
         debugText: error.errMsg || "WebSocket 连接异常"
       });
+      this.schedulePolling();
+      this.scheduleReconnect();
     });
 
     socket.onClose(() => {
@@ -443,6 +501,8 @@ Page({
       this.setData({
         realtimeText: `实时通道已断开，轮询同步中：${getApiBaseUrl()}`
       });
+      this.schedulePolling();
+      this.scheduleReconnect();
     });
   },
 
@@ -466,6 +526,7 @@ Page({
     }
 
     const payload = event.payload;
+    this.lastRealtimeAt = Date.now();
 
     if (
       event.type === "auction:snapshot" ||
@@ -474,8 +535,21 @@ Page({
       event.type === "auction:extended" ||
       event.type === "auction:ended"
     ) {
-      this.applySnapshot(payload);
-      this.setData({ debugText: `实时同步 ${time(Date.now())}` });
+      if (this.applySnapshot(payload)) {
+        this.setData({ debugText: `实时同步 ${time(Date.now())}` });
+      }
+      return;
+    }
+
+    if (event.type === "auction:cancelled") {
+      if (payload && payload.snapshot) {
+        this.applySnapshot(payload.snapshot);
+      } else {
+        this.loadSnapshot();
+      }
+
+      this.showHint(payload && payload.reason ? `竞拍已取消：${payload.reason}` : "竞拍已取消");
+      this.setData({ debugText: `竞拍已取消 ${time(Date.now())}` });
       return;
     }
 
@@ -520,6 +594,20 @@ Page({
   },
 
   applySnapshot(snapshot) {
+    if (!snapshot || !snapshot.auction || snapshot.auction.liveRoomId !== this.data.liveRoomId) {
+      return false;
+    }
+
+    if (
+      this.data.snapshot &&
+      (snapshot.auction.version < this.data.snapshot.auction.version ||
+        (snapshot.auction.version === this.data.snapshot.auction.version &&
+          snapshot.serverTime < this.data.snapshot.serverTime)) &&
+      !this.isDemoResetSnapshot(snapshot)
+    ) {
+      return false;
+    }
+
     const nextBid = snapshot.auction.currentPrice + snapshot.auction.incrementStep;
     const safeProductImageUrl = this.resolveProductImageUrl(snapshot.product);
     const product = {
@@ -531,11 +619,16 @@ Page({
       priceText: money(bid.price),
       createdAtText: time(bid.createdAt)
     }));
-    const currentBidPrice = Number(this.data.bidPrice);
+    const bidPriceText = String(this.data.bidPrice || "").trim();
+    const currentBidPrice = Number(bidPriceText);
+    const hasManualBidInput = bidPriceText.length > 0;
+    const shouldKeepManualBid = snapshot.auction.status === "ACTIVE" && this.isEditingBidPrice;
     const shouldUseNextBid =
-      snapshot.auction.status !== "ACTIVE" ||
-      !Number.isFinite(currentBidPrice) ||
-      currentBidPrice < nextBid;
+      !shouldKeepManualBid &&
+      (snapshot.auction.status !== "ACTIVE" ||
+        !hasManualBidInput ||
+        !Number.isFinite(currentBidPrice) ||
+        currentBidPrice < nextBid);
     const progressPercent =
       snapshot.auction.ceilingPrice > 0
         ? Math.min(100, Math.round((snapshot.auction.currentPrice / snapshot.auction.ceilingPrice) * 100))
@@ -547,6 +640,7 @@ Page({
       serverOffset: snapshot.serverTime - Date.now(),
       bidPrice: shouldUseNextBid ? String(nextBid) : this.data.bidPrice,
       currentPriceText: money(snapshot.auction.currentPrice),
+      nextBidText: money(nextBid),
       incrementText: money(snapshot.auction.incrementStep),
       ceilingText: money(snapshot.auction.ceilingPrice),
       stockText: `库存 ${product.stock === undefined ? 1 : product.stock} 件`,
@@ -563,9 +657,22 @@ Page({
       productStateText: this.getProductStateText(snapshot),
       progressPercent,
       progressText: `${progressPercent}%`,
-      ruleText: `起拍价 ${money(snapshot.auction.startPrice)} / 最低加价 ${money(snapshot.auction.incrementStep)} / 封顶价 ${money(snapshot.auction.ceilingPrice)}`
+      ruleText: `起拍价 ${money(snapshot.auction.startPrice)} / 最低加价 ${money(snapshot.auction.incrementStep)} / 封顶价 ${money(snapshot.auction.ceilingPrice)}`,
+      lastSyncText: time(Date.now())
     });
     this.refreshComputed();
+    return true;
+  },
+
+  isDemoResetSnapshot(snapshot) {
+    return (
+      snapshot.auction.status === "PENDING" &&
+      snapshot.auction.version === 1 &&
+      snapshot.auction.startTime === null &&
+      snapshot.auction.endTime === null &&
+      snapshot.bids.length === 0 &&
+      snapshot.order === null
+    );
   },
 
   getProductStateText(snapshot) {
@@ -646,14 +753,18 @@ Page({
 
     const nextBid = snapshot.auction.currentPrice + snapshot.auction.incrementStep;
     const bidAmount = Number(this.data.bidPrice);
+    const hasValidBidAmount = Number.isFinite(bidAmount);
+    const isActive = snapshot.auction.status === "ACTIVE";
+    const isOverCeiling = hasValidBidAmount && bidAmount > snapshot.auction.ceilingPrice;
     const canBid =
-      snapshot.auction.status === "ACTIVE" &&
-      Number.isFinite(bidAmount) &&
-      bidAmount >= nextBid;
+      isActive &&
+      hasValidBidAmount &&
+      bidAmount >= nextBid &&
+      !isOverCeiling;
 
     this.setData({
       remainingText:
-        snapshot.auction.status === "ACTIVE"
+        isActive
           ? remaining(snapshot.auction.endTime, this.data.serverOffset)
           : "00:00",
       canBid,
@@ -662,8 +773,10 @@ Page({
         ? this.data.hint
         : canBid
           ? "本次金额满足规则"
-          : snapshot.auction.status === "ACTIVE"
-            ? `最低金额 ${money(nextBid)}`
+          : isActive
+            ? isOverCeiling
+              ? `不能超过封顶价 ${money(snapshot.auction.ceilingPrice)}`
+              : `最低金额 ${money(nextBid)}`
             : snapshot.auction.status === "SOLD"
               ? "本场已成交，请主播重开后参与"
               : "开始后可参与"
@@ -676,7 +789,42 @@ Page({
   },
 
   onBidInput(event) {
+    this.isEditingBidPrice = true;
     this.setData({ bidPrice: event.detail.value });
+    this.refreshComputed();
+  },
+
+  onBidInputFocus() {
+    this.isEditingBidPrice = true;
+  },
+
+  onBidInputBlur() {
+    this.isEditingBidPrice = false;
+    this.refreshComputed();
+  },
+
+  fillNextBid() {
+    const snapshot = this.data.snapshot;
+
+    if (!snapshot || snapshot.auction.status !== "ACTIVE") {
+      return;
+    }
+
+    const nextBid = snapshot.auction.currentPrice + snapshot.auction.incrementStep;
+    this.isEditingBidPrice = false;
+    this.setData({ bidPrice: String(nextBid) });
+    this.refreshComputed();
+  },
+
+  fillCeilingBid() {
+    const snapshot = this.data.snapshot;
+
+    if (!snapshot || snapshot.auction.status !== "ACTIVE") {
+      return;
+    }
+
+    this.isEditingBidPrice = false;
+    this.setData({ bidPrice: String(snapshot.auction.ceilingPrice) });
     this.refreshComputed();
   },
 

@@ -1,0 +1,4 @@
+# Optional extra: enables the LangGraph agent variant (/v1/agent/graph).
+# The service runs without these; the graph path degrades to local fallback.
+langgraph>=1.2,<2
+langchain-openai>=1,<2

@@ -1,0 +1,15 @@
+.git
+.gitdata-local
+.agents
+.codex
+node_modules
+dist
+data
+output
+*.log
+services/agent/.venv
+services/agent/__pycache__
+**/__pycache__
+playwright-report
+test-results
+

@@ -28,6 +28,7 @@
         <text class="stage-meta">{{room.hostName}} / {{room.viewerCount}} 人浏览</text>
         <text class="stage-meta">{{buyerText}}</text>
         <text class="realtime">{{realtimeText}}</text>
+        <text class="realtime-detail">最近同步 {{lastSyncText}}</text>
       </view>
     </view>
 
@@ -116,9 +117,20 @@
       <input
         type="number"
         value="{{bidPrice}}"
-        placeholder="请输入参与金额"
+        placeholder="请输入要竞拍的金额"
+        confirm-type="done"
+        bindfocus="onBidInputFocus"
         bindinput="onBidInput"
+        bindblur="onBidInputBlur"
       />
+      <view class="bid-quick-row">
+        <button class="secondary bid-quick-button" disabled="{{!snapshot || snapshot.auction.status !== 'ACTIVE'}}" bindtap="fillNextBid">
+          最低 {{nextBidText}}
+        </button>
+        <button class="secondary bid-quick-button" disabled="{{!snapshot || snapshot.auction.status !== 'ACTIVE'}}" bindtap="fillCeilingBid">
+          封顶 {{ceilingText}}
+        </button>
+      </view>
       <button class="primary" disabled="{{!canBid || submitting}}" bindtap="submitBid">
         {{submitting ? "提交中" : bidButtonText}}
       </button>

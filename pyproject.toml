@@ -1,0 +1,67 @@
+# Python tooling for the FastAPI Agent service and test suites.
+# The repository root also hosts a Node workspace; this file only configures the
+# Python side (services/agent and tests/).
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+extend-exclude = ["node_modules", "dist", "output", ".gitdata-local"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "C4",  # flake8-comprehensions
+]
+ignore = [
+    "E501",  # line length is handled by the formatter, not enforced hard
+    "B008",  # FastAPI uses function calls (Depends/Header) in argument defaults
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests intentionally reach into private helpers to cover error branches.
+"services/agent/tests/*" = ["SIM117"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["services/agent/app"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+check_untyped_defs = true
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["services/agent/tests"]
+
+[tool.coverage.run]
+source = ["services/agent/app"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+
+[tool.mutmut]
+# Mutation testing focuses on the safety-critical, deterministic logic where a
+# surviving mutant would be a genuine gap: risk rules, retrieval, policy guard
+# and the circuit breaker. Wider modules (I/O, FastAPI wiring) are excluded to
+# keep the run fast and the signal high.
+source_paths = ["services/agent/app"]
+only_mutate = [
+    "services/agent/app/policy.py",
+    "services/agent/app/reliability.py",
+    "services/agent/app/knowledge.py",
+    "services/agent/app/tools.py",
+]
+pytest_add_cli_args_test_selection = ["services/agent/tests"]
+also_copy = [
+    "services/__init__.py",
+    "services/agent/__init__.py",
+    "services/agent/tests",
+]

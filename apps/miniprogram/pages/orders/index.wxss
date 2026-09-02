@@ -2,6 +2,19 @@
   display: grid;
   gap: 10rpx;
   margin-bottom: 28rpx;
+  padding: 28rpx;
+  border-radius: 12rpx;
+  background: #17212b;
+  box-shadow: 0 16rpx 34rpx rgba(23, 33, 43, 0.16);
+}
+
+.header .eyebrow,
+.header .muted {
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.header .title {
+  color: #ffffff;
 }
 
 .title {
@@ -18,6 +31,7 @@
   border: 1rpx solid #d9e1e7;
   border-radius: 12rpx;
   background: #ffffff;
+  box-shadow: 0 10rpx 24rpx rgba(23, 33, 43, 0.05);
 }
 
 .buyer {

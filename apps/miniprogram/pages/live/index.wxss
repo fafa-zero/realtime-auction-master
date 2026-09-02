@@ -32,6 +32,8 @@
   margin-bottom: 20rpx;
   border-radius: 12rpx;
   background: #111820;
+  border: 1rpx solid #263440;
+  box-shadow: 0 18rpx 38rpx rgba(23, 33, 43, 0.2);
 }
 
 .stage image {
@@ -110,6 +112,10 @@
   bottom: 24rpx;
   display: grid;
   gap: 8rpx;
+  padding: 18rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.14);
+  border-radius: 12rpx;
+  background: rgba(17, 24, 32, 0.58);
   color: #ffffff;
 }
 
@@ -129,11 +135,16 @@
 }
 
 .stage-meta {
+  overflow: hidden;
   color: rgba(255, 255, 255, 0.82);
   font-size: 24rpx;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .realtime {
+  max-width: 100%;
+  overflow: hidden;
   width: fit-content;
   padding: 8rpx 14rpx;
   border: 1rpx solid rgba(255, 255, 255, 0.28);
@@ -142,6 +153,13 @@
   color: rgba(255, 255, 255, 0.9);
   font-size: 22rpx;
   font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.realtime-detail {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 20rpx;
 }
 
 .product {
@@ -242,6 +260,17 @@
   border: 1rpx solid #d9e1e7;
   border-radius: 12rpx;
   background: #ffffff;
+  box-shadow: 0 8rpx 20rpx rgba(23, 33, 43, 0.04);
+}
+
+.stat:nth-child(1) text:last-child,
+.stat:nth-child(4) text:last-child {
+  color: #d82f44;
+}
+
+.stat:nth-child(2) text:last-child,
+.stat:nth-child(5) text:last-child {
+  color: #12805c;
 }
 
 .stat text:first-child {
@@ -298,6 +327,21 @@ input {
   border: 1rpx solid #d9e1e7;
   border-radius: 12rpx;
   background: #fbfcfd;
+}
+
+.bid-quick-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12rpx;
+  margin-bottom: 16rpx;
+}
+
+.bid-quick-button {
+  min-height: 72rpx;
+  margin: 0;
+  padding: 0 12rpx;
+  font-size: 24rpx;
+  line-height: 72rpx;
 }
 
 .hint {

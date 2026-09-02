@@ -1,0 +1,30 @@
+name: Mutation testing
+
+# Mutation testing is slower and its score is a quality signal rather than a hard
+# gate, so it runs on demand and on a weekly schedule instead of blocking PRs.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  mutmut:
+    name: Agent core mutation score
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: services/agent/requirements-dev.txt
+      - run: python -m pip install -r services/agent/requirements-dev.txt
+      - name: Run mutation testing on core modules
+        run: python -m mutmut run
+      - name: Show results
+        if: always()
+        run: python -m mutmut results
